@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum SocialPlatform {
+  LINKEDIN
+  FACEBOOK
+  X
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  PARTIAL
+}
+
+enum PublishStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          Role     @default(USER)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  createdByAdminId String?
+  createdByAdmin    User?   @relation("AdminCreatedUsers", fields: [createdByAdminId], references: [id])
+  createdUsers      User[]  @relation("AdminCreatedUsers")
+
+  subscription  Subscription?
+  socialAccounts SocialAccount[]
+  posts         Post[]
+
+  @@map("users")
+}
+
+// A plan template admins can assign to users. The four defaults (Free/Creator/
+// Professional/Agency) are seeded rows, not hardcoded — admins can disable any
+// of them (isActive=false stops new assignments; existing subscribers keep
+// working) or create their own custom plan with its own limits and price.
+model Plan {
+  id                     String   @id @default(uuid())
+  name                   String   @unique
+  price                  Int      @default(0)
+  // null = unlimited
+  postsLimit             Int?
+  connectedAccountsLimit Int?
+  // Which platforms a subscriber on this plan may connect at all (separate from
+  // connectedAccountsLimit, which caps how many total). Defaults to all three.
+  platforms              SocialPlatform[] @default([LINKEDIN, FACEBOOK, X])
+  isCustom               Boolean  @default(false)
+  isActive               Boolean  @default(true)
+  // Stripe recurring Price ID (price_...) this plan checks out against. Required
+  // for any plan with price > 0 before someone can actually sign up for it — null
+  // is fine (and expected) for the Free plan, which never touches Stripe at all.
+  stripePriceId          String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id            String             @id @default(uuid())
+  userId        String             @unique
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          Plan               @relation(fields: [planId], references: [id])
+  status        SubscriptionStatus @default(ACTIVE)
+  // Per-user overrides of the plan's limits; null = use the plan's own limit.
+  postsLimit             Int?
+  connectedAccountsLimit Int?
+  // Set once the user has checked out for a paid plan; both stay null for
+  // everyone on a free plan and for accounts an admin granted access to directly.
+  stripeCustomerId       String?
+  stripeSubscriptionId   String?
+  startDate     DateTime           @default(now())
+  endDate       DateTime?
+  grantedByAdminId String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+model SocialAccount {
+  id                String         @id @default(uuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform          SocialPlatform
+  platformUserId    String
+  platformUsername  String?
+  accessToken       String
+  refreshToken      String?
+  tokenExpiresAt    DateTime?
+  scopes            String?
+  connectedAt       DateTime       @default(now())
+  metadata          Json?
+
+  @@unique([userId, platform])
+  @@map("social_accounts")
+}
+
+model Post {
+  id              String       @id @default(uuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content         String
+  imageUrl        String?
+  platforms       SocialPlatform[]
+  // Per-platform overrides of `content` (e.g. a shortened version for X's 280-char
+  // limit) produced by the rule-based auto-adapt step. Keyed by SocialPlatform;
+  // a platform without an entry here just publishes `content` as-is.
+  platformContent Json?
+  status          PostStatus   @default(DRAFT)
+  scheduledAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  results     PostPublishResult[]
+
+  @@map("posts")
+}
+
+model PostPublishResult {
+  id             String         @id @default(uuid())
+  postId         String
+  post           Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform       SocialPlatform
+  status         PublishStatus  @default(PENDING)
+  platformPostId String?
+  error          String?
+  publishedAt    DateTime?
+  createdAt      DateTime       @default(now())
+
+  @@unique([postId, platform])
+  @@map("post_publish_results")
+}
