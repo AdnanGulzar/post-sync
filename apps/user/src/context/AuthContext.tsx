@@ -6,9 +6,11 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  // Returns a Stripe Checkout URL when the chosen plan requires payment — the
-  // caller should redirect there instead of navigating into the app.
-  signup: (email: string, password: string, name: string, planId: string) => Promise<string | undefined>;
+  // planId is optional — omit it to start on the default (Free) plan and let the
+  // user pick a paid one afterwards on /billing. Returns a Stripe Checkout URL
+  // when the chosen plan requires payment — the caller should redirect there
+  // instead of navigating into the app.
+  signup: (email: string, password: string, name: string, planId?: string) => Promise<string | undefined>;
   loginWithToken: (token: string) => Promise<void>;
   logout: () => void;
 }
@@ -38,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user);
   }
 
-  async function signup(email: string, password: string, name: string, planId: string) {
+  async function signup(email: string, password: string, name: string, planId?: string) {
     const res = await api.post<{ accessToken: string; user: AuthUser; checkoutUrl?: string }>('/auth/signup', {
       email,
       password,

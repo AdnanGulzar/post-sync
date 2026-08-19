@@ -15,6 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { LinkedInIdentityService } from './oauth/linkedin-identity.service';
 import { FacebookIdentityService } from './oauth/facebook-identity.service';
 import { XIdentityService } from './oauth/x-identity.service';
+import { GoogleIdentityService } from './oauth/google-identity.service';
 import { OAuthSignupStateService } from './oauth/oauth-signup-state.service';
 import { PlansService } from '../subscriptions/plans.service';
 import { StripeService } from '../stripe/stripe.service';
@@ -44,6 +45,7 @@ export class AuthService {
     private linkedInIdentity: LinkedInIdentityService,
     private facebookIdentity: FacebookIdentityService,
     private xIdentity: XIdentityService,
+    private googleIdentity: GoogleIdentityService,
     private plansService: PlansService,
     private stripeService: StripeService,
   ) {}
@@ -52,7 +54,8 @@ export class AuthService {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('An account with this email already exists');
 
-    const plan = await this.plansService.findByIdOrThrow(dto.planId);
+    const planId = dto.planId ?? (await this.plansService.defaultSignupPlanId());
+    const plan = await this.plansService.findByIdOrThrow(planId);
     if (!plan.isActive) throw new BadRequestException('This plan is no longer available — pick another.');
 
     const isFree = plan.price === 0;
@@ -133,7 +136,9 @@ export class AuthService {
     if (identity.connect) {
       const { platformUserId, platformUsername, accessToken, refreshToken, tokenExpiresAt, metadata } = identity.connect;
       await this.prisma.socialAccount.upsert({
-        where: { userId_platform: { userId: user.user.id, platform } },
+        where: {
+          userId_platform_platformUserId: { userId: user.user.id, platform, platformUserId },
+        },
         create: {
           userId: user.user.id,
           platform,
@@ -158,6 +163,54 @@ export class AuthService {
     return user;
   }
 
+  /** Builds the "Continue with Google" authorization URL. Login-only — Google isn't a posting platform. */
+  getGoogleOAuthUrl(): string {
+    const state = this.stateService.create('GOOGLE');
+    return this.googleIdentity.getAuthUrl(state);
+  }
+
+  /** Handles Google's redirect back, then signs the user up or logs them in. */
+  async handleGoogleOAuthCallback(code: string, state: string) {
+    const entry = this.stateService.consume(state);
+    if (!entry || entry.platform !== 'GOOGLE') {
+      throw new BadRequestException('Invalid or expired sign-in attempt. Please try again.');
+    }
+
+    const identity = await this.googleIdentity.fetchIdentity(code);
+    return this.findOrCreateGoogleUser(identity);
+  }
+
+  private async findOrCreateGoogleUser(identity: { platformUserId: string; email?: string; name: string }) {
+    if (!identity.email) {
+      throw new BadRequestException('Google did not share an email address for this account.');
+    }
+
+    let user = await this.prisma.user.findUnique({ where: { email: identity.email } });
+    let isNewUser = false;
+    if (!user) {
+      isNewUser = true;
+      const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 12);
+      // Google sign-in has no plan-picker step of its own — start everyone on the
+      // default plan (normally Free) and send brand-new accounts to /billing right
+      // after, where they can pick a paid plan if they want one.
+      const planId = await this.plansService.defaultSignupPlanId();
+      const plan = await this.plansService.findByIdOrThrow(planId);
+      user = await this.prisma.user.create({
+        data: {
+          email: identity.email,
+          passwordHash,
+          name: identity.name,
+          role: 'USER',
+          subscription: { create: { planId, status: plan.price === 0 ? 'ACTIVE' : 'INACTIVE' } },
+        },
+      });
+    }
+
+    if (!user.isActive) throw new UnauthorizedException('This account has been deactivated');
+
+    return { ...this.buildAuthResponse(user), isNewUser };
+  }
+
   private async findOrCreateFromOAuth(platform: SocialPlatform, identity: OAuthIdentity) {
     // X doesn't hand out an email on the standard API tier. Fall back to a
     // deterministic placeholder so repeat sign-ins with the same platform
@@ -165,7 +218,9 @@ export class AuthService {
     const email = identity.email || `${platform.toLowerCase()}-${identity.platformUserId}@oauth.syncpost.local`;
 
     let user = await this.prisma.user.findUnique({ where: { email } });
+    let isNewUser = false;
     if (!user) {
+      isNewUser = true;
       const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 12);
       const planId = await this.plansService.defaultSignupPlanId();
       const plan = await this.plansService.findByIdOrThrow(planId);
@@ -177,6 +232,8 @@ export class AuthService {
           role: 'USER',
           // OAuth sign-in has no plan-picker step, so it always lands on the default
           // plan — same free-is-instant rule as the form signup applies here too.
+          // Brand-new accounts get sent to /billing right after, where they can
+          // pick a paid plan if they want one.
           subscription: {
             create: { planId, status: plan.price === 0 ? 'ACTIVE' : 'INACTIVE' },
           },
@@ -186,7 +243,7 @@ export class AuthService {
 
     if (!user.isActive) throw new UnauthorizedException('This account has been deactivated');
 
-    return this.buildAuthResponse(user);
+    return { ...this.buildAuthResponse(user), isNewUser };
   }
 
   private buildAuthResponse(user: { id: string; email: string; role: string; name: string }) {

@@ -1,37 +1,9 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, ThemeToggle, cn } from '@syncpost/ui';
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, ThemeToggle } from '@syncpost/ui';
 import { useAuth } from '../context/AuthContext';
-import { ApiError, Plan } from '@syncpost/api-client';
-import { api } from '../lib/api';
+import { ApiError } from '@syncpost/api-client';
 import OAuthButtons from '../components/OAuthButtons';
-
-function PlanCard({ plan, selected, onSelect }: { plan: Plan; selected: boolean; onSelect: () => void }) {
-  const isFree = plan.price === 0;
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={cn(
-        'flex flex-col rounded-md border p-3 text-left transition-colors hover:border-foreground/40',
-        selected && 'border-primary ring-1 ring-primary',
-      )}
-    >
-      <span className="text-sm font-semibold">{plan.name}</span>
-      <span className="mt-1 text-lg font-semibold tracking-tight">
-        {isFree ? 'Free' : `$${plan.price}`}
-        {!isFree && <span className="text-xs font-normal text-muted-foreground">/mo</span>}
-      </span>
-      <span className="mt-1 text-xs text-muted-foreground">
-        {plan.postsLimit === null ? 'Unlimited posts' : `${plan.postsLimit} posts/mo`} ·{' '}
-        {plan.connectedAccountsLimit === null ? 'Unlimited platforms' : `${plan.connectedAccountsLimit} platforms`}
-      </span>
-      <span className={cn('mt-2 text-xs font-medium', isFree ? 'text-success-fg' : 'text-muted-foreground')}>
-        {isFree ? 'No card required' : 'Card required'}
-      </span>
-    </button>
-  );
-}
 
 export default function Signup() {
   const { signup } = useAuth();
@@ -42,44 +14,21 @@ export default function Signup() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [plansLoading, setPlansLoading] = useState(true);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
-
-  useEffect(() => {
-    api
-      .get<Plan[]>('/plans')
-      .then((data) => {
-        setPlans(data);
-        const free = data.find((p) => p.price === 0);
-        setSelectedPlanId(free?.id || data[0]?.id || '');
-      })
-      .finally(() => setPlansLoading(false));
-  }, []);
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!selectedPlanId) {
-      setError('Pick a plan to continue.');
-      return;
-    }
     setSubmitting(true);
     try {
-      const checkoutUrl = await signup(email, password, name, selectedPlanId);
-      if (checkoutUrl) {
-        window.location.href = checkoutUrl;
-      } else {
-        navigate('/');
-      }
+      // No plan choice here — the account starts on the default (Free) plan and
+      // /billing is where they pick a paid one afterwards, right after logging in.
+      await signup(email, password, name);
+      navigate('/billing');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Signup failed');
     } finally {
       setSubmitting(false);
     }
   }
-
-  const selectedPlan = plans.find((p) => p.id === selectedPlanId);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-muted px-4 py-10">
@@ -100,24 +49,6 @@ export default function Signup() {
           </div>
           <form onSubmit={onSubmit} className="space-y-4 text-left">
             <div className="space-y-1.5">
-              <Label>Choose a plan</Label>
-              {plansLoading ? (
-                <p className="text-sm text-muted-foreground">Loading plans...</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {plans.map((plan) => (
-                    <PlanCard
-                      key={plan.id}
-                      plan={plan}
-                      selected={plan.id === selectedPlanId}
-                      onSelect={() => setSelectedPlanId(plan.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
               <Label htmlFor="name">Full name</Label>
               <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
@@ -137,14 +68,8 @@ export default function Signup() {
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={submitting || plansLoading}>
-              {submitting
-                ? selectedPlan && selectedPlan.price > 0
-                  ? 'Redirecting to payment...'
-                  : 'Creating account...'
-                : selectedPlan && selectedPlan.price > 0
-                  ? 'Continue to payment'
-                  : 'Sign up'}
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? 'Creating account...' : 'Sign up'}
             </Button>
           </form>
           <p className="mt-4 text-sm text-muted-foreground">

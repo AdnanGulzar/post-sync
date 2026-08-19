@@ -52,6 +52,13 @@
   --info-bg: #eff8ff;
   --info-fg: #175cd3;
 
+  /* Categorical chart identity (LinkedIn / Facebook / X) — the validated first
+     three slots of the dataviz skill's reference palette, which is the subset
+     proven to pass all-pairs CVD separation (any two can sit side by side). */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+
   --radius: 0.5rem;
 }
 
@@ -91,6 +98,11 @@
   --warning-fg: #fbbf24;
   --info-bg: #0a1f2c;
   --info-fg: #60a5fa;
+
+  /* Same three hues, stepped for the dark surface. */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
 }
 
 @theme inline {
@@ -129,6 +141,10 @@
   --color-warning-fg: var(--warning-fg);
   --color-info-bg: var(--info-bg);
   --color-info-fg: var(--info-fg);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

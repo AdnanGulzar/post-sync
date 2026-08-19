@@ -1,7 +1,26 @@
-import { SocialAccount } from '@prisma/client';
+import { DestinationType, SocialAccount } from '@prisma/client';
 
 export interface PublishResult {
   platformPostId: string;
+}
+
+// Every field is optional because not every platform's API exposes every metric
+// (e.g. LinkedIn's socialActions endpoint has no share/impression count).
+export interface PostMetrics {
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  impressions?: number;
+}
+
+export interface ConnectedDestination {
+  platformUserId: string;
+  platformUsername?: string;
+  destinationType: DestinationType;
+  accessToken: string;
+  refreshToken?: string;
+  tokenExpiresAt?: Date;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SocialPlatformService {
@@ -9,27 +28,20 @@ export interface SocialPlatformService {
   getAuthUrl(state: string, codeVerifier?: string): string;
 
   /**
-   * Exchanges the authorization `code` from the provider's redirect for tokens,
-   * fetches the connecting account's basic profile, and returns everything
-   * needed to persist a SocialAccount row.
+   * Exchanges the authorization `code` from the provider's redirect for tokens, then
+   * discovers every destination (personal account, Pages, Groups, etc.) the grant gives
+   * access to. A single connect attempt can surface more than one — e.g. several
+   * Facebook Pages, or a personal profile plus a Company Page — each becomes its own
+   * SocialAccount row. Always returns at least one entry when the grant itself succeeded;
+   * a provider that finds zero postable destinations should throw instead of returning [].
    */
-  handleCallback(
-    code: string,
-    codeVerifier?: string,
-  ): Promise<{
-    platformUserId: string;
-    platformUsername?: string;
-    accessToken: string;
-    refreshToken?: string;
-    tokenExpiresAt?: Date;
-    metadata?: Record<string, unknown>;
-  }>;
+  handleCallback(code: string, codeVerifier?: string): Promise<ConnectedDestination[]>;
 
   /**
-   * Publishes `content` (and optional image) using a previously connected account.
-   * When `scheduledAt` is passed and the platform supports native scheduling
-   * (see NATIVELY_SCHEDULABLE_PLATFORMS), the provider itself holds and publishes
-   * the post at that time instead of publishing immediately.
+   * Publishes `content` (and optional image) to this specific destination.
+   * When `scheduledAt` is passed and the destination supports native scheduling
+   * (see isNativelySchedulable), the provider itself holds and publishes the post
+   * at that time instead of publishing immediately.
    */
   publish(account: SocialAccount, content: string, imageUrl?: string, scheduledAt?: Date): Promise<PublishResult>;
 
@@ -42,4 +54,7 @@ export interface SocialPlatformService {
    * rather than silently no-op.
    */
   editPost(account: SocialAccount, platformPostId: string, content: string): Promise<void>;
+
+  /** Fetches current engagement metrics for a previously published post, live from the platform's API. */
+  getMetrics(account: SocialAccount, platformPostId: string): Promise<PostMetrics>;
 }

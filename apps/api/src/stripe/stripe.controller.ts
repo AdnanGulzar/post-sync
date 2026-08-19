@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   ForbiddenException,
   Get,
   Headers,
   Param,
+  Patch,
   Post,
   RawBodyRequest,
   Req,
@@ -75,21 +77,27 @@ export class StripeController {
     return { status: 'pending' as const };
   }
 
-  // Lets someone who abandoned or failed checkout start a fresh session for the
-  // paid plan they already picked at signup, without re-registering.
+  // Starts checkout for a paid plan — either a fresh session for the plan already
+  // picked at signup (no body, e.g. after an abandoned/failed checkout), or a
+  // switch to a different paid plan (planId in the body, from the billing page).
   @UseGuards(JwtAuthGuard)
   @Post('checkout-session')
-  async createCheckoutSession(@CurrentUser() user: any) {
+  async createCheckoutSession(@CurrentUser() user: any, @Body('planId') planId?: string) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId: user.id },
       include: { plan: true },
     });
     if (!subscription) throw new BadRequestException('No subscription found for this account.');
-    if (subscription.plan.price === 0) {
+
+    const targetPlan = planId ? await this.plansService.findByIdOrThrow(planId) : subscription.plan;
+    if (!targetPlan.isActive && targetPlan.id !== subscription.planId) {
+      throw new BadRequestException('This plan is no longer available — pick another.');
+    }
+    if (targetPlan.price === 0) {
       throw new BadRequestException("The plan you're on doesn't require payment.");
     }
-    if (!subscription.plan.stripePriceId) {
-      throw new BadRequestException(`The "${subscription.plan.name}" plan isn't fully set up for payment yet.`);
+    if (!targetPlan.stripePriceId) {
+      throw new BadRequestException(`The "${targetPlan.name}" plan isn't fully set up for payment yet.`);
     }
 
     const customerId =
@@ -100,26 +108,66 @@ export class StripeController {
 
     const checkoutUrl = await this.stripeService.createSubscriptionCheckoutSession({
       customerId,
-      priceId: subscription.plan.stripePriceId,
+      priceId: targetPlan.stripePriceId,
       userId: user.id,
-      planId: subscription.planId,
+      planId: targetPlan.id,
+      // Switching plans while already paying — cancel the old subscription once
+      // the new one is confirmed, so they're never billed for both at once.
+      previousStripeSubscriptionId:
+        targetPlan.id !== subscription.planId ? subscription.stripeSubscriptionId ?? undefined : undefined,
     });
     return { checkoutUrl };
   }
 
+  // Switches to a free plan — no Stripe checkout needed, but any existing paid
+  // subscription must be cancelled so they stop being billed for it.
+  @UseGuards(JwtAuthGuard)
+  @Patch('change-plan')
+  async changePlan(@CurrentUser() user: any, @Body('planId') planId: string) {
+    if (!planId) throw new BadRequestException('planId is required.');
+
+    const subscription = await this.prisma.subscription.findUnique({ where: { userId: user.id } });
+    if (!subscription) throw new BadRequestException('No subscription found for this account.');
+
+    const plan = await this.plansService.findByIdOrThrow(planId);
+    if (!plan.isActive) throw new BadRequestException('This plan is no longer available — pick another.');
+    if (plan.price > 0) {
+      throw new BadRequestException('This plan requires payment — start checkout instead.');
+    }
+
+    if (subscription.stripeSubscriptionId) {
+      await this.stripeService.cancelSubscription(subscription.stripeSubscriptionId);
+    }
+
+    return this.prisma.subscription.update({
+      where: { userId: user.id },
+      data: { planId: plan.id, status: 'ACTIVE', stripeSubscriptionId: null },
+      include: { plan: true },
+    });
+  }
+
   private async activateFromSession(session: Stripe.Checkout.Session) {
     const userId = session.metadata?.userId;
+    const planId = session.metadata?.planId;
+    const previousStripeSubscriptionId = session.metadata?.previousStripeSubscriptionId;
     if (!userId) return;
+
+    const newSubscriptionId =
+      typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
 
     await this.prisma.subscription.updateMany({
       where: { userId },
       data: {
         status: 'ACTIVE',
+        ...(planId ? { planId } : {}),
         stripeCustomerId: typeof session.customer === 'string' ? session.customer : session.customer?.id,
-        stripeSubscriptionId:
-          typeof session.subscription === 'string' ? session.subscription : session.subscription?.id,
+        stripeSubscriptionId: newSubscriptionId,
       },
     });
+
+    if (previousStripeSubscriptionId && previousStripeSubscriptionId !== newSubscriptionId) {
+      await this.stripeService.cancelSubscription(previousStripeSubscriptionId);
+    }
   }
 
   private async syncSubscriptionStatus(sub: Stripe.Subscription) {

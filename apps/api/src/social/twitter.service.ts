@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException } from '@
 import axios from 'axios';
 import { randomBytes, createHash } from 'crypto';
 import { SocialAccount } from '@prisma/client';
-import { SocialPlatformService, PublishResult } from './publisher.interface';
+import { SocialPlatformService, PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
 
 /**
  * X (Twitter) API v2 posting, OAuth 2.0 with PKCE (user context).
@@ -37,7 +37,7 @@ export class TwitterService implements SocialPlatformService {
     return `https://twitter.com/i/oauth2/authorize?${params.toString()}`;
   }
 
-  async handleCallback(code: string, codeVerifier?: string) {
+  async handleCallback(code: string, codeVerifier?: string): Promise<ConnectedDestination[]> {
     const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
 
     const tokenRes = await axios.post(
@@ -65,13 +65,16 @@ export class TwitterService implements SocialPlatformService {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    return {
-      platformUserId: meRes.data.data.id,
-      platformUsername: meRes.data.data.username,
-      accessToken,
-      refreshToken,
-      tokenExpiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
-    };
+    return [
+      {
+        platformUserId: meRes.data.data.id,
+        platformUsername: meRes.data.data.username,
+        destinationType: 'PERSONAL',
+        accessToken,
+        refreshToken,
+        tokenExpiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
+      },
+    ];
   }
 
   async publish(account: SocialAccount, content: string): Promise<PublishResult> {
@@ -106,5 +109,27 @@ export class TwitterService implements SocialPlatformService {
     throw new BadRequestException(
       "X doesn't support editing a published post through its API — delete it and post again instead.",
     );
+  }
+
+  // impression_count is only populated for tweets the requesting user authored, which
+  // is always true here since we only ever fetch metrics for posts SyncPost published.
+  async getMetrics(account: SocialAccount, platformPostId: string): Promise<PostMetrics> {
+    try {
+      const res = await axios.get(`https://api.twitter.com/2/tweets/${platformPostId}`, {
+        params: { 'tweet.fields': 'public_metrics' },
+        headers: { Authorization: `Bearer ${account.accessToken}` },
+      });
+      const m = res.data.data?.public_metrics ?? {};
+      return {
+        likes: m.like_count,
+        comments: m.reply_count,
+        shares: m.retweet_count,
+        impressions: m.impression_count,
+      };
+    } catch (err: any) {
+      throw new InternalServerErrorException(
+        `Could not fetch X metrics: ${err.response?.data?.detail || err.message}`,
+      );
+    }
   }
 }

@@ -1,8 +1,6 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import * as express from 'express';
 import { AppModule } from './app/app.module';
-import { UPLOAD_DIR } from './uploads/uploads.controller';
 
 async function bootstrap() {
   // rawBody: true keeps the original request bytes around (on req.rawBody) alongside
@@ -17,8 +15,6 @@ async function bootstrap() {
     ],
     credentials: true,
   });
-
-  app.use('/uploads', express.static(UPLOAD_DIR));
 
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),

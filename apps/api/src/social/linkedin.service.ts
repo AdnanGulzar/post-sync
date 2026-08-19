@@ -1,10 +1,18 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
 import { SocialAccount } from '@prisma/client';
-import { SocialPlatformService, PublishResult } from './publisher.interface';
+import { SocialPlatformService, PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+
+// Off by default: r_organization_admin / w_organization_social require LinkedIn's
+// Marketing Developer Platform partner approval — a formal application review, not
+// something a normal app gets by just adding testers. Requesting these scopes before
+// your app has that access will make the whole LinkedIn login grant fail. Flip on only
+// after LinkedIn has actually approved these scopes for your app.
+const ORGANIZATIONS_ENABLED = process.env.LINKEDIN_ENABLE_ORGANIZATIONS === 'true';
 
 /**
- * LinkedIn "Share on LinkedIn" (w_member_social) integration.
+ * LinkedIn "Share on LinkedIn" (w_member_social) integration, plus optional Company
+ * Page posting (w_organization_social) behind LINKEDIN_ENABLE_ORGANIZATIONS.
  * Requires a LinkedIn app (https://www.linkedin.com/developers/apps) with the
  * "Sign In with LinkedIn using OpenID Connect" and "Share on LinkedIn" products added.
  */
@@ -15,17 +23,20 @@ export class LinkedInService implements SocialPlatformService {
   private redirectUri = process.env.LINKEDIN_REDIRECT_URI || '';
 
   getAuthUrl(state: string): string {
+    const scopes = ['openid', 'profile', 'email', 'w_member_social'];
+    if (ORGANIZATIONS_ENABLED) scopes.push('w_organization_social', 'r_organization_admin');
+
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
       state,
-      scope: 'openid profile email w_member_social',
+      scope: scopes.join(' '),
     });
     return `https://www.linkedin.com/oauth/v2/authorization?${params.toString()}`;
   }
 
-  async handleCallback(code: string) {
+  async handleCallback(code: string): Promise<ConnectedDestination[]> {
     const tokenRes = await axios.post(
       'https://www.linkedin.com/oauth/v2/accessToken',
       new URLSearchParams({
@@ -40,18 +51,49 @@ export class LinkedInService implements SocialPlatformService {
 
     const accessToken = tokenRes.data.access_token;
     const expiresIn = tokenRes.data.expires_in as number | undefined;
+    const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined;
 
     const profileRes = await axios.get('https://api.linkedin.com/v2/userinfo', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    return {
-      platformUserId: profileRes.data.sub,
-      platformUsername: profileRes.data.name,
-      accessToken,
-      tokenExpiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
-      metadata: { email: profileRes.data.email },
-    };
+    const destinations: ConnectedDestination[] = [
+      {
+        platformUserId: profileRes.data.sub,
+        platformUsername: profileRes.data.name,
+        destinationType: 'PERSONAL',
+        accessToken,
+        tokenExpiresAt,
+        metadata: { email: profileRes.data.email },
+      },
+    ];
+
+    if (ORGANIZATIONS_ENABLED) {
+      try {
+        const orgsRes = await axios.get(
+          'https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organization~(id,localizedName)))',
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        const elements = (orgsRes.data.elements as Array<{ 'organization~': { id: number; localizedName: string } }>) || [];
+        for (const el of elements) {
+          const org = el['organization~'];
+          if (!org) continue;
+          destinations.push({
+            platformUserId: String(org.id),
+            platformUsername: org.localizedName,
+            destinationType: 'PAGE',
+            accessToken,
+            tokenExpiresAt,
+            metadata: { kind: 'organization' },
+          });
+        }
+      } catch {
+        // r_organization_admin not actually granted, or no admin'd organizations —
+        // degrade gracefully rather than failing the whole connect attempt.
+      }
+    }
+
+    return destinations;
   }
 
   /**
@@ -60,13 +102,13 @@ export class LinkedInService implements SocialPlatformService {
    * uploaded as bytes through their asset API and referenced by URN —
    * https://learn.microsoft.com/en-us/linkedin/marketing/integrations/community-management/shares/images-api
    */
-  private async uploadImage(accessToken: string, personUrn: string, imageUrl: string): Promise<string> {
+  private async uploadImage(accessToken: string, ownerUrn: string, imageUrl: string): Promise<string> {
     const registerRes = await axios.post(
       'https://api.linkedin.com/v2/assets?action=registerUpload',
       {
         registerUploadRequest: {
           recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
-          owner: personUrn,
+          owner: ownerUrn,
           serviceRelationships: [
             { relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' },
           ],
@@ -88,9 +130,15 @@ export class LinkedInService implements SocialPlatformService {
     return asset;
   }
 
+  private authorUrnFor(account: SocialAccount): string {
+    return account.destinationType === 'PAGE'
+      ? `urn:li:organization:${account.platformUserId}`
+      : `urn:li:person:${account.platformUserId}`;
+  }
+
   async publish(account: SocialAccount, content: string, imageUrl?: string): Promise<PublishResult> {
     try {
-      const authorUrn = `urn:li:person:${account.platformUserId}`;
+      const authorUrn = this.authorUrnFor(account);
       const asset = imageUrl ? await this.uploadImage(account.accessToken, authorUrn, imageUrl) : undefined;
 
       const body: any = {
@@ -142,5 +190,25 @@ export class LinkedInService implements SocialPlatformService {
     throw new BadRequestException(
       "LinkedIn doesn't support editing a published post through its API — delete it and post again instead.",
     );
+  }
+
+  // The socialActions endpoint works with just the member's own token (no Marketing
+  // Developer Platform approval needed), but only surfaces likes + top-level comments —
+  // impressions/shares require the restricted organizationalEntityShareStatistics API.
+  async getMetrics(account: SocialAccount, platformPostId: string): Promise<PostMetrics> {
+    try {
+      const res = await axios.get(
+        `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(platformPostId)}`,
+        { headers: { Authorization: `Bearer ${account.accessToken}` } },
+      );
+      return {
+        likes: res.data.likesSummary?.totalLikes,
+        comments: res.data.commentsSummary?.totalFirstLevelComments,
+      };
+    } catch (err: any) {
+      throw new InternalServerErrorException(
+        `Could not fetch LinkedIn metrics: ${err.response?.data?.message || err.message}`,
+      );
+    }
   }
 }

@@ -43,16 +43,19 @@ export class SocialController {
   ) {
     const userAppUrl = process.env.USER_APP_URL || 'http://localhost:4200';
     try {
-      await this.socialService.handleCallback(platform, code, state);
-      return res.redirect(`${userAppUrl}/connections?connected=${platform.toLowerCase()}`);
+      const accounts = await this.socialService.handleCallback(platform, code, state);
+      return res.redirect(
+        `${userAppUrl}/connections?connected=${platform.toLowerCase()}&count=${accounts.length}`,
+      );
     } catch (err: any) {
       return res.redirect(`${userAppUrl}/connections?error=${encodeURIComponent(err.message || 'connect_failed')}`);
     }
   }
 
+  // Targets a specific connected destination (a user can have more than one per platform).
   @UseGuards(JwtAuthGuard)
-  @Delete(':platform')
-  disconnect(@CurrentUser() user: any, @Param('platform', new ParseEnumPipe(SocialPlatform)) platform: SocialPlatform) {
-    return this.socialService.disconnect(user.id, platform);
+  @Delete('accounts/:id')
+  disconnect(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.socialService.disconnect(user.id, id);
   }
 }

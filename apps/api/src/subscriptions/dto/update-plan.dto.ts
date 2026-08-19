@@ -1,4 +1,5 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { SocialPlatform } from '@prisma/client';
 
 // A full-state PATCH: send every field with its intended value each time
 // (matches how the admin UI form works) — a number sets a limit, null means
@@ -31,7 +32,15 @@ export class UpdatePlanDto {
   isActive?: boolean;
 
   // The Stripe recurring Price ID (price_...) this plan checks out against.
+  // Send null to clear it (@IsOptional short-circuits validation for null too).
   @IsOptional()
   @IsString()
-  stripePriceId?: string;
+  stripePriceId?: string | null;
+
+  // Which platforms a subscriber on this plan may connect.
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(SocialPlatform, { each: true })
+  platforms?: SocialPlatform[];
 }

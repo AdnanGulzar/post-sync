@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, ConnectedAccount, SocialPlatform } from '@syncpost/api-client';
-import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton, toast } from '@syncpost/ui';
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Skeleton, toast } from '@syncpost/ui';
 import { api } from '../lib/api';
 
 const PLATFORMS: { key: SocialPlatform; label: string }[] = [
@@ -10,11 +10,17 @@ const PLATFORMS: { key: SocialPlatform; label: string }[] = [
   { key: 'X', label: 'X (Twitter)' },
 ];
 
+const DESTINATION_LABEL: Record<string, string> = {
+  PERSONAL: 'Personal',
+  PAGE: 'Page',
+  GROUP: 'Group',
+};
+
 export default function Connections() {
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectingTo, setConnectingTo] = useState<SocialPlatform | null>(null);
-  const [disconnectingFrom, setDisconnectingFrom] = useState<SocialPlatform | null>(null);
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [params] = useSearchParams();
 
   async function load() {
@@ -30,8 +36,11 @@ export default function Connections() {
 
   useEffect(() => {
     const justConnected = params.get('connected');
+    const count = Number(params.get('count') || '1');
     const connectedError = params.get('error');
-    if (justConnected) toast.success(`Connected ${justConnected} successfully.`);
+    if (justConnected) {
+      toast.success(`Connected ${justConnected}${count > 1 ? ` (${count} destinations found)` : ''}.`);
+    }
     if (connectedError) toast.error(connectedError);
   }, []);
 
@@ -46,16 +55,16 @@ export default function Connections() {
     }
   }
 
-  async function disconnect(platform: SocialPlatform) {
-    setDisconnectingFrom(platform);
+  async function disconnect(account: ConnectedAccount) {
+    setDisconnectingId(account.id);
     try {
-      await api.delete(`/social/${platform}`);
+      await api.delete(`/social/accounts/${account.id}`);
       await load();
-      toast.success(`Disconnected ${platform}.`);
+      toast.success(`Disconnected ${account.platformUsername || account.platform}.`);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : `Could not disconnect ${platform}`);
+      toast.error(err instanceof ApiError ? err.message : 'Could not disconnect this account');
     } finally {
-      setDisconnectingFrom(null);
+      setDisconnectingId(null);
     }
   }
 
@@ -84,28 +93,36 @@ export default function Connections() {
         ) : (
           <ul className="divide-y">
             {PLATFORMS.map((p) => {
-              const connected = accounts.find((a) => a.platform === p.key);
+              const destinations = accounts.filter((a) => a.platform === p.key);
               return (
-                <li key={p.key} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
-                  <span className="text-sm">
-                    <strong className="font-medium">{p.label}</strong>
-                    <span className="text-muted-foreground">
-                      {connected ? ` — connected as ${connected.platformUsername || connected.id}` : ' — not connected'}
-                    </span>
-                  </span>
-                  {connected ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={disconnectingFrom === p.key}
-                      onClick={() => disconnect(p.key)}
-                    >
-                      {disconnectingFrom === p.key ? 'Disconnecting...' : 'Disconnect'}
-                    </Button>
-                  ) : (
+                <li key={p.key} className="py-3 first:pt-0 last:pb-0">
+                  <div className="mb-2 flex items-center justify-between">
+                    <strong className="text-sm font-medium">{p.label}</strong>
                     <Button size="sm" disabled={connectingTo === p.key} onClick={() => connect(p.key)}>
-                      {connectingTo === p.key ? 'Redirecting...' : 'Connect'}
+                      {connectingTo === p.key ? 'Redirecting...' : destinations.length > 0 ? '+ Connect another' : 'Connect'}
                     </Button>
+                  </div>
+                  {destinations.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Not connected.</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {destinations.map((d) => (
+                        <li key={d.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                          <span className="flex items-center gap-2 text-sm">
+                            {d.platformUsername || d.id}
+                            <Badge variant="secondary">{DESTINATION_LABEL[d.destinationType] || d.destinationType}</Badge>
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={disconnectingId === d.id}
+                            onClick={() => disconnect(d)}
+                          >
+                            {disconnectingId === d.id ? 'Disconnecting...' : 'Disconnect'}
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </li>
               );

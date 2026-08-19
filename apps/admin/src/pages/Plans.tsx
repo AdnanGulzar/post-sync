@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { ApiError, Plan } from '@syncpost/api-client';
+import { ApiError, Plan, SocialPlatform } from '@syncpost/api-client';
 import {
   Badge,
   Button,
@@ -20,19 +20,38 @@ import {
 } from '@syncpost/ui';
 import { api } from '../lib/api';
 import { LimitInput } from '../components/LimitInput';
+import { PlatformMultiSelect } from '../components/PlatformMultiSelect';
 
 function EditPlanRow({ plan, onUpdated }: { plan: Plan; onUpdated: () => void }) {
   const [price, setPrice] = useState(plan.price);
   const [postsLimit, setPostsLimit] = useState<number | null>(plan.postsLimit);
   const [connectedAccountsLimit, setConnectedAccountsLimit] = useState<number | null>(plan.connectedAccountsLimit);
+  const [platforms, setPlatforms] = useState<SocialPlatform[]>(plan.platforms);
+  const [stripePriceId, setStripePriceId] = useState(plan.stripePriceId ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Once the admin touches any field again after a failed save, drop the stale error
+  // instead of leaving it hanging around after they've already fixed things.
+  useEffect(() => {
+    setError(null);
+  }, [price, postsLimit, connectedAccountsLimit, platforms, stripePriceId]);
+
   async function save() {
+    if (platforms.length === 0) {
+      setError('Pick at least one platform.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/admin/plans/${plan.id}`, { price, postsLimit, connectedAccountsLimit });
+      await api.patch(`/admin/plans/${plan.id}`, {
+        price,
+        postsLimit,
+        connectedAccountsLimit,
+        platforms,
+        stripePriceId: stripePriceId || null,
+      });
       onUpdated();
       toast.success(`"${plan.name}" updated.`);
     } catch (err) {
@@ -103,7 +122,18 @@ function EditPlanRow({ plan, onUpdated }: { plan: Plan; onUpdated: () => void })
         <LimitInput value={postsLimit} onChange={setPostsLimit} />
       </TableCell>
       <TableCell>
+        <PlatformMultiSelect value={platforms} onChange={setPlatforms} />
+      </TableCell>
+      <TableCell>
         <LimitInput value={connectedAccountsLimit} onChange={setConnectedAccountsLimit} />
+      </TableCell>
+      <TableCell>
+        <Input
+          value={stripePriceId}
+          onChange={(e) => setStripePriceId(e.target.value)}
+          placeholder={plan.price === 0 ? 'Not needed' : 'price_...'}
+          className="h-8 w-32 text-xs"
+        />
       </TableCell>
       <TableCell>
         <button
@@ -142,8 +172,16 @@ export default function Plans() {
   const [price, setPrice] = useState(0);
   const [postsLimit, setPostsLimit] = useState<number | null>(null);
   const [connectedAccountsLimit, setConnectedAccountsLimit] = useState<number | null>(null);
+  const [platforms, setPlatforms] = useState<SocialPlatform[]>(['LINKEDIN', 'FACEBOOK', 'X']);
+  const [stripePriceId, setStripePriceId] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  // Same idea as the edit row: once the admin edits the create form again, the
+  // previous submit's error is no longer relevant.
+  useEffect(() => {
+    setCreateError(null);
+  }, [name, price, postsLimit, connectedAccountsLimit, platforms, stripePriceId]);
 
   async function load() {
     setLoading(true);
@@ -159,13 +197,26 @@ export default function Plans() {
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setCreateError(null);
+    if (platforms.length === 0) {
+      setCreateError('Pick at least one platform.');
+      return;
+    }
     setCreating(true);
     try {
-      await api.post('/admin/plans', { name, price, postsLimit, connectedAccountsLimit });
+      await api.post('/admin/plans', {
+        name,
+        price,
+        postsLimit,
+        connectedAccountsLimit,
+        platforms,
+        stripePriceId: stripePriceId || undefined,
+      });
       setName('');
       setPrice(0);
       setPostsLimit(null);
       setConnectedAccountsLimit(null);
+      setPlatforms(['LINKEDIN', 'FACEBOOK', 'X']);
+      setStripePriceId('');
       setShowCreate(false);
       await load();
       toast.success(`"${name}" plan created.`);
@@ -208,8 +259,21 @@ export default function Plans() {
               <LimitInput value={postsLimit} onChange={setPostsLimit} />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Platforms</label>
+              <label className="mb-1 block text-xs text-muted-foreground">Allowed platforms</label>
+              <PlatformMultiSelect value={platforms} onChange={setPlatforms} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Max connections</label>
               <LimitInput value={connectedAccountsLimit} onChange={setConnectedAccountsLimit} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Stripe price ID</label>
+              <Input
+                value={stripePriceId}
+                onChange={(e) => setStripePriceId(e.target.value)}
+                placeholder={price === 0 ? 'Not needed' : 'price_...'}
+                className="w-36"
+              />
             </div>
             <Button type="submit" disabled={creating}>
               {creating ? 'Creating...' : 'Create plan'}
@@ -224,7 +288,9 @@ export default function Plans() {
               <TableHead>Plan</TableHead>
               <TableHead>Price</TableHead>
               <TableHead>Posts / month</TableHead>
-              <TableHead>Platforms</TableHead>
+              <TableHead>Allowed platforms</TableHead>
+              <TableHead>Max connections</TableHead>
+              <TableHead>Stripe price ID</TableHead>
               <TableHead>Status</TableHead>
               <TableHead />
             </TableRow>
@@ -243,7 +309,13 @@ export default function Plans() {
                     <Skeleton className="h-8 w-28" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-16 w-20" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-8 w-28" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-8 w-32" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-5 w-16 rounded-full" />

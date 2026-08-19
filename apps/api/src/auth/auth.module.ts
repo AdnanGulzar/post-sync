@@ -8,6 +8,7 @@ import { OAuthSignupStateService } from './oauth/oauth-signup-state.service';
 import { LinkedInIdentityService } from './oauth/linkedin-identity.service';
 import { FacebookIdentityService } from './oauth/facebook-identity.service';
 import { XIdentityService } from './oauth/x-identity.service';
+import { GoogleIdentityService } from './oauth/google-identity.service';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { StripeModule } from '../stripe/stripe.module';
 
@@ -29,6 +30,7 @@ import { StripeModule } from '../stripe/stripe.module';
     LinkedInIdentityService,
     FacebookIdentityService,
     XIdentityService,
+    GoogleIdentityService,
   ],
   exports: [JwtModule],
 })

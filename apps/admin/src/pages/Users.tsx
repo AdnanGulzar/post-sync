@@ -23,7 +23,6 @@ import {
   toast,
 } from '@syncpost/ui';
 import { api } from '../lib/api';
-import { LimitInput } from '../components/LimitInput';
 
 const STATUSES: SubscriptionStatus[] = ['ACTIVE', 'INACTIVE', 'EXPIRED'];
 
@@ -39,16 +38,12 @@ function GrantSubscriptionForm({
   const currentPlanId = userItem.subscription?.planId || plans[0]?.id || '';
   const [planId, setPlanId] = useState(currentPlanId);
   const [status, setStatus] = useState<SubscriptionStatus>(userItem.subscription?.status || 'ACTIVE');
-  // These are always saved as an explicit per-user override, pre-filled from any existing
-  // override or else the plan's own current limit, so "not touching it" is a no-op save.
-  const [postsLimit, setPostsLimit] = useState<number | null>(
-    userItem.subscription?.postsLimit ?? userItem.subscription?.plan.postsLimit ?? null,
-  );
-  const [connectedAccountsLimit, setConnectedAccountsLimit] = useState<number | null>(
-    userItem.subscription?.connectedAccountsLimit ?? userItem.subscription?.plan.connectedAccountsLimit ?? null,
-  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setError(null);
+  }, [planId, status]);
 
   // A plan currently assigned to a user but since disabled still needs to show up in the picker.
   const selectablePlans =
@@ -60,7 +55,7 @@ function GrantSubscriptionForm({
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/admin/users/${userItem.id}/subscription`, { planId, status, postsLimit, connectedAccountsLimit });
+      await api.patch(`/admin/users/${userItem.id}/subscription`, { planId, status });
       onUpdated();
       toast.success(`Subscription updated for ${userItem.name}.`);
     } catch (err) {
@@ -99,14 +94,6 @@ function GrantSubscriptionForm({
           ))}
         </SelectContent>
       </Select>
-      <div>
-        <p className="mb-0.5 text-[0.6875rem] text-muted-foreground">Posts / month</p>
-        <LimitInput value={postsLimit} onChange={setPostsLimit} />
-      </div>
-      <div>
-        <p className="mb-0.5 text-[0.6875rem] text-muted-foreground">Platforms</p>
-        <LimitInput value={connectedAccountsLimit} onChange={setConnectedAccountsLimit} />
-      </div>
       <Button size="sm" className="h-8 text-xs" onClick={save} disabled={saving}>
         {saving ? 'Saving...' : 'Save'}
       </Button>
@@ -126,6 +113,10 @@ export default function Users() {
   const [password, setPassword] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    setCreateError(null);
+  }, [name, email, password]);
 
   async function load() {
     setLoading(true);

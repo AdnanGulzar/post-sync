@@ -11,8 +11,11 @@ export default function OAuthCallback() {
   useEffect(() => {
     const token = params.get('token');
     if (!token) return;
+    // A brand-new account (no plan-picker step in the OAuth flow itself) lands on
+    // /billing to choose a plan; a returning user goes straight into the app.
+    const isNewUser = params.get('isNewUser') === '1';
     loginWithToken(token)
-      .then(() => navigate('/', { replace: true }))
+      .then(() => navigate(isNewUser ? '/billing' : '/', { replace: true }))
       .catch(() => setError('Could not complete sign-in. Please try again.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

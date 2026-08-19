@@ -1,4 +1,5 @@
-import { IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEnum, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { SocialPlatform } from '@prisma/client';
 
 export class CreatePlanDto {
   @IsString()
@@ -28,4 +29,11 @@ export class CreatePlanDto {
   @IsOptional()
   @IsString()
   stripePriceId?: string;
+
+  // Which platforms a subscriber on this plan may connect. Omitted = all three.
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(SocialPlatform, { each: true })
+  platforms?: SocialPlatform[];
 }

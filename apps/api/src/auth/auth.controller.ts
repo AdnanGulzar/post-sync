@@ -27,6 +27,26 @@ export class AuthController {
     return user;
   }
 
+  // Public: the frontend calls this to get the "Continue with Google" URL.
+  // Declared before the generic ":platform" route below so "google" doesn't
+  // get swallowed by that param — Nest/Express match routes in declaration order.
+  @Get('oauth/google')
+  getGoogleOAuthUrl() {
+    return { url: this.authService.getGoogleOAuthUrl() };
+  }
+
+  // Public: Google redirects the user's browser here after they approve access.
+  @Get('oauth/google/callback')
+  async googleOAuthCallback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
+    const userAppUrl = process.env.USER_APP_URL || 'http://localhost:4220';
+    try {
+      const { accessToken, isNewUser } = await this.authService.handleGoogleOAuthCallback(code, state);
+      return res.redirect(`${userAppUrl}/oauth/callback?token=${accessToken}${isNewUser ? '&isNewUser=1' : ''}`);
+    } catch (err: any) {
+      return res.redirect(`${userAppUrl}/oauth/callback?error=${encodeURIComponent(err.message || 'oauth_failed')}`);
+    }
+  }
+
   // Public: the frontend calls this to get the "Continue with <platform>" URL.
   @Get('oauth/:platform')
   getOAuthUrl(@Param('platform', new ParseEnumPipe(SocialPlatform)) platform: SocialPlatform) {
@@ -45,8 +65,8 @@ export class AuthController {
   ) {
     const userAppUrl = process.env.USER_APP_URL || 'http://localhost:4220';
     try {
-      const { accessToken } = await this.authService.handleOAuthCallback(platform, code, state);
-      return res.redirect(`${userAppUrl}/oauth/callback?token=${accessToken}`);
+      const { accessToken, isNewUser } = await this.authService.handleOAuthCallback(platform, code, state);
+      return res.redirect(`${userAppUrl}/oauth/callback?token=${accessToken}${isNewUser ? '&isNewUser=1' : ''}`);
     } catch (err: any) {
       return res.redirect(`${userAppUrl}/oauth/callback?error=${encodeURIComponent(err.message || 'oauth_failed')}`);
     }

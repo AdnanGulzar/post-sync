@@ -42,6 +42,7 @@ export class PlansService {
         postsLimit: dto.postsLimit,
         connectedAccountsLimit: dto.connectedAccountsLimit,
         stripePriceId: dto.stripePriceId,
+        platforms: dto.platforms ?? ['LINKEDIN', 'FACEBOOK', 'X'],
         isCustom: true,
       },
     });
@@ -63,6 +64,7 @@ export class PlansService {
         postsLimit: dto.postsLimit,
         connectedAccountsLimit: dto.connectedAccountsLimit,
         stripePriceId: dto.stripePriceId,
+        platforms: dto.platforms,
         isActive: dto.isActive,
       },
     });

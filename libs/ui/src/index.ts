@@ -14,3 +14,6 @@ export * from './lib/theme-provider';
 export * from './lib/theme-toggle';
 export * from './lib/skeleton';
 export * from './lib/sonner';
+export * from './lib/popover';
+export * from './lib/calendar';
+export * from './lib/charts';

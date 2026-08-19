@@ -21,6 +21,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
           '--error-bg': 'var(--destructive-bg)',
           '--error-text': 'var(--destructive-fg)',
           '--error-border': 'var(--destructive-bg)',
+          '--warning-bg': 'var(--warning-bg)',
+          '--warning-text': 'var(--warning-fg)',
+          '--warning-border': 'var(--warning-bg)',
+          '--info-bg': 'var(--info-bg)',
+          '--info-text': 'var(--info-fg)',
+          '--info-border': 'var(--info-bg)',
         } as React.CSSProperties
       }
       {...props}

@@ -40,6 +40,14 @@ enum PublishStatus {
   FAILED
 }
 
+// What kind of destination a connected account posts to. Not every platform
+// supports every type — see each publisher service for what's actually wired up.
+enum DestinationType {
+  PERSONAL
+  PAGE
+  GROUP
+}
+
 model User {
   id            String   @id @default(uuid())
   email         String   @unique
@@ -96,9 +104,6 @@ model Subscription {
   planId        String
   plan          Plan               @relation(fields: [planId], references: [id])
   status        SubscriptionStatus @default(ACTIVE)
-  // Per-user overrides of the plan's limits; null = use the plan's own limit.
-  postsLimit             Int?
-  connectedAccountsLimit Int?
   // Set once the user has checked out for a paid plan; both stay null for
   // everyone on a free plan and for accounts an admin granted access to directly.
   stripeCustomerId       String?
@@ -112,21 +117,27 @@ model Subscription {
   @@map("subscriptions")
 }
 
+// One row per connected destination. A user can have more than one per platform
+// now (e.g. a Facebook Page AND a Facebook Group, or a LinkedIn personal profile
+// AND a LinkedIn Company Page) — uniqueness is per actual destination, not per platform.
 model SocialAccount {
-  id                String         @id @default(uuid())
+  id                String          @id @default(uuid())
   userId            String
-  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   platform          SocialPlatform
+  destinationType   DestinationType @default(PERSONAL)
   platformUserId    String
   platformUsername  String?
   accessToken       String
   refreshToken      String?
   tokenExpiresAt    DateTime?
   scopes            String?
-  connectedAt       DateTime       @default(now())
+  connectedAt       DateTime        @default(now())
   metadata          Json?
 
-  @@unique([userId, platform])
+  results PostPublishResult[]
+
+  @@unique([userId, platform, platformUserId])
   @@map("social_accounts")
 }
 
@@ -136,6 +147,12 @@ model Post {
   user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   content         String
   imageUrl        String?
+  // The specific connected destinations (SocialAccount ids) this post targets —
+  // lets a post go to e.g. one Facebook Page but not another, or a Facebook Page
+  // and a Facebook Group at once.
+  destinationIds  String[]
+  // Denormalized set of platforms represented in destinationIds, kept for quick
+  // filtering/display without joining against SocialAccount.
   platforms       SocialPlatform[]
   // Per-platform overrides of `content` (e.g. a shortened version for X's 280-char
   // limit) produced by the rule-based auto-adapt step. Keyed by SocialPlatform;
@@ -152,16 +169,23 @@ model Post {
 }
 
 model PostPublishResult {
-  id             String         @id @default(uuid())
-  postId         String
-  post           Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
-  platform       SocialPlatform
-  status         PublishStatus  @default(PENDING)
-  platformPostId String?
-  error          String?
-  publishedAt    DateTime?
-  createdAt      DateTime       @default(now())
+  id              String         @id @default(uuid())
+  postId          String
+  post            Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  // Nullable: historical rows from before multi-destination support, or a
+  // destination the user has since disconnected, won't have a live account to point to.
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  platform        SocialPlatform
+  // Denormalized "Page/Group/Personal" label captured at publish time, so the
+  // post history still reads sensibly even if the account is later disconnected.
+  destinationLabel String?
+  status          PublishStatus  @default(PENDING)
+  platformPostId  String?
+  error           String?
+  publishedAt     DateTime?
+  createdAt       DateTime       @default(now())
 
-  @@unique([postId, platform])
+  @@unique([postId, socialAccountId])
   @@map("post_publish_results")
 }
