@@ -5,6 +5,8 @@
     "buildCommand": "npm install && npx nx build api"
   },
   "deploy": {
-    "startCommand": "npm run start:prod"
+    "startCommand": "npm run start:prod",
+    "healthcheckPath": "/api/health",
+    "healthcheckTimeout": 30
   }
 }
