@@ -4,8 +4,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Only used by `prisma migrate`/`db push` — Supabase's connection pooler
+  // (the DATABASE_URL above, port 6543) doesn't support the session-level
+  // features migrations need, so those commands go straight to Postgres
+  // (port 5432) instead. Local Postgres can just point both at the same URL.
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
