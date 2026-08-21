@@ -1,4 +1,5 @@
 import { IsUUID } from 'class-validator';
+import { ENTITY_ID_UUID_MODE } from '../../common/pipes/parse-entity-id.pipe';
 
 /**
  * Body for `PATCH /stripe/change-plan`.
@@ -8,6 +9,6 @@ import { IsUUID } from 'class-validator';
  */
 export class ChangePlanDto {
   /** The free plan to switch to. */
-  @IsUUID()
+  @IsUUID(ENTITY_ID_UUID_MODE)
   planId!: string;
 }

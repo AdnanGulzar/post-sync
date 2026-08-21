@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../common/guards/subscription.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -7,6 +7,7 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
 import { AnalyticsRangeDto } from './dto/analytics-range.dto';
+import { ParseEntityIdPipe } from '../common/pipes/parse-entity-id.pipe';
 
 @UseGuards(JwtAuthGuard, SubscriptionGuard)
 @Controller('posts')
@@ -26,7 +27,7 @@ export class PostsController {
   }
 
   @Get(':id')
-  findOne(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
+  findOne(@CurrentUser() user: any, @Param('id', ParseEntityIdPipe) id: string) {
     return this.postsService.findOne(user.id, id);
   }
 
@@ -36,18 +37,18 @@ export class PostsController {
   }
 
   @Patch(':id')
-  update(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePostDto) {
+  update(@CurrentUser() user: any, @Param('id', ParseEntityIdPipe) id: string, @Body() dto: UpdatePostDto) {
     return this.postsService.updateContent(user.id, id, dto.content);
   }
 
   // Turns an existing draft into a real post — publishing it now or scheduling it.
   @Post(':id/publish')
-  publishDraft(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string, @Body() dto: PublishDraftDto) {
+  publishDraft(@CurrentUser() user: any, @Param('id', ParseEntityIdPipe) id: string, @Body() dto: PublishDraftDto) {
     return this.postsService.publishDraft(user.id, id, dto);
   }
 
   @Delete(':id')
-  remove(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
+  remove(@CurrentUser() user: any, @Param('id', ParseEntityIdPipe) id: string) {
     return this.postsService.remove(user.id, id);
   }
 }

@@ -1,9 +1,10 @@
-import { Controller, Delete, Get, Param, ParseEnumPipe, ParseUUIDPipe, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, ParseEnumPipe, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { SocialPlatform } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SocialService } from './social.service';
+import { ParseEntityIdPipe } from '../common/pipes/parse-entity-id.pipe';
 
 @Controller('social')
 export class SocialController {
@@ -46,7 +47,7 @@ export class SocialController {
   // Targets a specific connected destination (a user can have more than one per platform).
   @UseGuards(JwtAuthGuard)
   @Delete('accounts/:id')
-  disconnect(@CurrentUser() user: any, @Param('id', ParseUUIDPipe) id: string) {
+  disconnect(@CurrentUser() user: any, @Param('id', ParseEntityIdPipe) id: string) {
     return this.socialService.disconnect(user.id, id);
   }
 }

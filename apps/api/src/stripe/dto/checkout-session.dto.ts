@@ -1,4 +1,5 @@
 import { IsOptional, IsUUID } from 'class-validator';
+import { ENTITY_ID_UUID_MODE } from '../../common/pipes/parse-entity-id.pipe';
 
 /**
  * Body for `POST /stripe/checkout-session`.
@@ -14,6 +15,6 @@ export class CheckoutSessionDto {
    * the subscription", which is the abandoned-checkout path.
    */
   @IsOptional()
-  @IsUUID()
+  @IsUUID(ENTITY_ID_UUID_MODE)
   planId?: string;
 }

@@ -23,8 +23,12 @@ const DEFAULT_RETRY_AFTER_MS = 60_000;
 export class HttpClient {
   private readonly instance: AxiosInstance;
 
-  constructor(timeoutMs: number = DEFAULT_TIMEOUT_MS) {
-    this.instance = axios.create({ timeout: timeoutMs });
+  // No constructor parameters: Nest resolves dependencies from design:paramtypes,
+  // where a defaulted `timeoutMs: number` appears as the Number constructor and
+  // fails to resolve at boot. Make the timeout configurable by injecting
+  // ConfigService, never by adding a defaulted primitive here.
+  constructor() {
+    this.instance = axios.create({ timeout: DEFAULT_TIMEOUT_MS });
   }
 
   /**

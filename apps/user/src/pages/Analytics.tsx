@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PlatformAnalytics, PostAnalytics, SocialPlatform } from '@syncpost/api-client';
+import { PlatformAnalytics, PostAnalytics } from '@syncpost/api-client';
 import { PLATFORMS } from '@syncpost/platform-core';
 import { Button, Card, CardContent, CardHeader, CardTitle, HorizontalBarChart, Skeleton, cn } from '@syncpost/ui';
 import { api } from '../lib/api';
-
 
 
 type DateRange = { from: Date | null; to: Date | null };

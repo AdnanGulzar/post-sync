@@ -6,7 +6,11 @@ import { LinkedInService } from './linkedin.service';
 import { FacebookService } from './facebook.service';
 import { TwitterService } from './twitter.service';
 import { HttpClient } from './publishers/http-client';
-import { PLATFORM_PUBLISHER, PublisherRegistry } from './publishers/publisher.registry';
+import {
+  PLATFORM_PUBLISHER,
+  PublisherRegistry,
+  type PlatformPublisher,
+} from './publishers/publisher.registry';
 
 /**
  * Every platform publisher is registered under the same multi-provider token,
@@ -24,11 +28,14 @@ const PUBLISHERS = [LinkedInService, FacebookService, TwitterService];
     HttpClient,
     PublisherRegistry,
     ...PUBLISHERS,
-    ...PUBLISHERS.map((useExisting) => ({
+    {
+      // Nest has no `multi: true` (that is an Angular concept) — collecting
+      // providers under one token means a factory that injects each of them
+      // and returns the array.
       provide: PLATFORM_PUBLISHER,
-      useExisting,
-      multi: true,
-    })),
+      useFactory: (...publishers: PlatformPublisher[]) => publishers,
+      inject: [...PUBLISHERS],
+    },
   ],
   exports: [SocialService],
 })

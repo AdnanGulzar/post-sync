@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AdminPostAnalytics, SocialPlatform } from '@syncpost/api-client';
+import { AdminPostAnalytics } from '@syncpost/api-client';
 import { PLATFORMS } from '@syncpost/platform-core';
 import { Card, CardContent, CardHeader, CardTitle, HorizontalBarChart, Skeleton, cn } from '@syncpost/ui';
 import { api } from '../lib/api';
-
 
 function StatTile({
   label,
