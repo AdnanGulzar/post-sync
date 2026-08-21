@@ -2,33 +2,30 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DestinationType, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OAuthStateService } from './oauth-state.service';
-import { LinkedInService } from './linkedin.service';
-import { FacebookService } from './facebook.service';
-import { TwitterService } from './twitter.service';
+import { PublisherRegistry } from './publishers/publisher.registry';
+import { createCodeVerifier } from './publishers/pkce';
+import { PLATFORMS } from '@syncpost/platform-core';
 import { SocialPlatformService, PublishResult, PostMetrics } from './publisher.interface';
 
 @Injectable()
 export class SocialService {
-  private services: Record<SocialPlatform, SocialPlatformService>;
-
   constructor(
     private prisma: PrismaService,
     private stateService: OAuthStateService,
-    private linkedIn: LinkedInService,
-    private facebook: FacebookService,
-    private twitter: TwitterService,
-  ) {
-    this.services = {
-      LINKEDIN: this.linkedIn,
-      FACEBOOK: this.facebook,
-      X: this.twitter,
-    };
-  }
+    private registry: PublisherRegistry,
+  ) {}
 
+  /**
+   * Resolves the publisher for a platform.
+   *
+   * @param platform - Platform to publish to.
+   * @returns The registered publisher.
+   * @throws {BadRequestException} If no publisher is registered — unreachable
+   *         in a booted app, since the registry validates completeness at
+   *         startup rather than at publish time.
+   */
   private serviceFor(platform: SocialPlatform): SocialPlatformService {
-    const service = this.services[platform];
-    if (!service) throw new BadRequestException(`Unsupported platform: ${platform}`);
-    return service;
+    return this.registry.for(platform);
   }
 
   listAccounts(userId: string) {
@@ -41,10 +38,9 @@ export class SocialService {
 
   getConnectUrl(userId: string, platform: SocialPlatform): string {
     const service = this.serviceFor(platform);
-    let codeVerifier: string | undefined;
-    if (platform === 'X') {
-      codeVerifier = TwitterService.generateCodeVerifier();
-    }
+    // Driven by the descriptor so a second PKCE platform needs no new branch.
+    const codeVerifier =
+      PLATFORMS[platform].connection === 'oauth2-pkce' ? createCodeVerifier() : undefined;
     const state = this.stateService.create(userId, platform, codeVerifier);
     return service.getAuthUrl(state, codeVerifier);
   }

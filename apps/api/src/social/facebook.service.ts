@@ -2,7 +2,9 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
 import { SocialAccount } from '@prisma/client';
-import { SocialPlatformService, PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+import { PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+import { PLATFORMS } from '@syncpost/platform-core';
+import type { PlatformPublisher } from './publishers/publisher.registry';
 
 const GRAPH_VERSION = 'v19.0';
 
@@ -29,7 +31,9 @@ const GROUPS_ENABLED = process.env.FACEBOOK_ENABLE_GROUPS === 'true';
  * publish_to_groups + groups_access_member_info, which are far more restricted.
  */
 @Injectable()
-export class FacebookService implements SocialPlatformService {
+export class FacebookService implements PlatformPublisher {
+  readonly descriptor = PLATFORMS.FACEBOOK;
+
   private clientId = process.env.FACEBOOK_APP_ID || '';
   private clientSecret = process.env.FACEBOOK_APP_SECRET || '';
   private redirectUri = process.env.FACEBOOK_REDIRECT_URI || '';

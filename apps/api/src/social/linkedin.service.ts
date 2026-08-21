@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import axios from 'axios';
 import { SocialAccount } from '@prisma/client';
-import { SocialPlatformService, PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+import { PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+import { PLATFORMS } from '@syncpost/platform-core';
+import type { PlatformPublisher } from './publishers/publisher.registry';
 
 // Off by default: r_organization_admin / w_organization_social require LinkedIn's
 // Marketing Developer Platform partner approval — a formal application review, not
@@ -17,7 +19,9 @@ const ORGANIZATIONS_ENABLED = process.env.LINKEDIN_ENABLE_ORGANIZATIONS === 'tru
  * "Sign In with LinkedIn using OpenID Connect" and "Share on LinkedIn" products added.
  */
 @Injectable()
-export class LinkedInService implements SocialPlatformService {
+export class LinkedInService implements PlatformPublisher {
+  readonly descriptor = PLATFORMS.LINKEDIN;
+
   private clientId = process.env.LINKEDIN_CLIENT_ID || '';
   private clientSecret = process.env.LINKEDIN_CLIENT_SECRET || '';
   private redirectUri = process.env.LINKEDIN_REDIRECT_URI || '';
