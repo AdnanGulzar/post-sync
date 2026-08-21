@@ -11,12 +11,13 @@ import { XIdentityService } from './oauth/x-identity.service';
 import { GoogleIdentityService } from './oauth/google-identity.service';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { StripeModule } from '../stripe/stripe.module';
+import { requireEnv } from '../config/require-env';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret-change-me',
+      secret: requireEnv('JWT_SECRET'),
       signOptions: { expiresIn: '7d' },
     }),
     SubscriptionsModule,

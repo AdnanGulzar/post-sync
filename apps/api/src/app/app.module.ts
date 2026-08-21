@@ -10,10 +10,11 @@ import { SocialModule } from '../social/social.module';
 import { PostsModule } from '../posts/posts.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { StripeModule } from '../stripe/stripe.module';
+import { validateEnv } from '../config/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ScheduleModule.forRoot(),
     PrismaModule,
     HealthModule,
