@@ -21,16 +21,11 @@ import { useAuth } from '../context/AuthContext';
 import { RichTextEditor, RichTextEditorHandle } from '../components/RichTextEditor';
 import { CharacterCount, PlatformPreview } from '../components/PlatformPreview';
 import { PostsList } from '../components/PostsList';
-import { adaptForPlatforms, wasAdapted } from '../lib/platformAdapt';
+import { ALL_PLATFORMS as PLATFORMS, adaptForPlatforms, wasAdapted } from '@syncpost/platform-core';
 import { DateTimePicker } from '../components/DateTimePicker';
 
 const RECENT_POSTS_LIMIT = 5;
 
-const PLATFORMS: { key: SocialPlatform; label: string }[] = [
-  { key: 'LINKEDIN', label: 'LinkedIn' },
-  { key: 'FACEBOOK', label: 'Facebook' },
-  { key: 'X', label: 'X (Twitter)' },
-];
 
 const DESTINATION_LABEL: Record<string, string> = {
   PERSONAL: 'Personal',
@@ -69,7 +64,7 @@ export default function Dashboard() {
     [selected, accounts],
   );
   const previewPlatforms =
-    selectedAccounts.length > 0 ? [...new Set(selectedAccounts.map((a) => a.platform))] : PLATFORMS.map((p) => p.key);
+    selectedAccounts.length > 0 ? [...new Set(selectedAccounts.map((a) => a.platform))] : PLATFORMS.map((p) => p.id);
   // Auto-adapt (no AI): each platform gets its own version of the content, shortened
   // to fit that platform's real character limit if the draft is too long. Platforms
   // that don't need shortening just get the content unchanged.
@@ -207,7 +202,7 @@ export default function Dashboard() {
                 {loadingPosts ? (
                   <div className="space-y-3">
                     {PLATFORMS.map((p) => (
-                      <div key={p.key}>
+                      <div key={p.id}>
                         <p className="mb-1 text-xs font-medium text-muted-foreground">{p.label}</p>
                         <Skeleton className="h-6 w-40" />
                       </div>
@@ -216,9 +211,9 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-3">
                     {PLATFORMS.map((p) => {
-                      const destinations = accounts.filter((a) => a.platform === p.key);
+                      const destinations = accounts.filter((a) => a.platform === p.id);
                       return (
-                        <div key={p.key}>
+                        <div key={p.id}>
                           <p className="mb-1 text-xs font-medium text-muted-foreground">{p.label}</p>
                           {destinations.length === 0 ? (
                             <p className="text-sm text-muted-foreground">Not connected</p>
@@ -272,7 +267,7 @@ export default function Dashboard() {
               <TabsList>
                 {previewPlatforms.map((key) => (
                   <TabsTrigger key={key} value={key}>
-                    {PLATFORMS.find((p) => p.key === key)?.label}
+                    {PLATFORMS.find((p) => p.id === key)?.label}
                   </TabsTrigger>
                 ))}
               </TabsList>
@@ -291,7 +286,7 @@ export default function Dashboard() {
                     <CharacterCount platform={key} content={adapted} />
                     {wasAdapted(content, key) && (
                       <p className="text-xs text-info-fg">
-                        Shortened to fit {PLATFORMS.find((p) => p.key === key)?.label}'s character limit — this is
+                        Shortened to fit {PLATFORMS.find((p) => p.id === key)?.label}'s character limit — this is
                         what will actually be published there.
                       </p>
                     )}

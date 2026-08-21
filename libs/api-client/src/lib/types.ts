@@ -1,7 +1,15 @@
+import type { DestinationType as CoreDestinationType, PlatformId } from '@syncpost/platform-core';
+
 export type Role = 'ADMIN' | 'USER';
 export type SubscriptionStatus = 'ACTIVE' | 'INACTIVE' | 'EXPIRED';
-export type SocialPlatform = 'LINKEDIN' | 'FACEBOOK' | 'X';
-export type DestinationType = 'PERSONAL' | 'PAGE' | 'GROUP';
+
+/**
+ * Re-exported from `@syncpost/platform-core` so the platform union has exactly
+ * one definition. These were hand-mirrored copies of the Prisma enums with no
+ * compile-time link to them.
+ */
+export type SocialPlatform = PlatformId;
+export type DestinationType = CoreDestinationType;
 export type PostStatus = 'DRAFT' | 'SCHEDULED' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED' | 'PARTIAL';
 export type PublishStatus = 'PENDING' | 'SUCCESS' | 'FAILED';
 

@@ -7,11 +7,6 @@ import { FacebookService } from './facebook.service';
 import { TwitterService } from './twitter.service';
 import { SocialPlatformService, PublishResult, PostMetrics } from './publisher.interface';
 
-/** Facebook Pages can be natively scheduled by Meta; nothing else can. */
-export function isNativelySchedulable(platform: SocialPlatform, destinationType: DestinationType): boolean {
-  return platform === 'FACEBOOK' && destinationType === 'PAGE';
-}
-
 @Injectable()
 export class SocialService {
   private services: Record<SocialPlatform, SocialPlatformService>;

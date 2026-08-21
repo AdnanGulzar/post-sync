@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Post, SocialAccount, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SocialService, isNativelySchedulable } from '../social/social.service';
+import { SocialService } from '../social/social.service';
+import { ALL_PLATFORM_IDS, isNativelySchedulable } from '@syncpost/platform-core';
 import { PostMetrics } from '../social/publisher.interface';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -87,7 +88,7 @@ export class PostsService {
     );
     const metricsByResultId = new Map(withMetrics.map((r) => [r.id, r.metrics]));
 
-    const platforms: SocialPlatform[] = ['LINKEDIN', 'FACEBOOK', 'X'];
+    const platforms: readonly SocialPlatform[] = ALL_PLATFORM_IDS;
     const platformStats = platforms.map((platform) => {
       const entries = allResults.filter(({ result }) => result.platform === platform);
       const success = entries.filter(({ result }) => result.status === 'SUCCESS').length;

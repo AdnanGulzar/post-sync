@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { SocialPlatform } from '@prisma/client';
+import { ALL_PLATFORM_IDS } from '@syncpost/platform-core';
 import { PrismaService } from '../prisma/prisma.service';
 
-const PLATFORMS: SocialPlatform[] = ['LINKEDIN', 'FACEBOOK', 'X'];
+const PLATFORMS: readonly SocialPlatform[] = ALL_PLATFORM_IDS;
 
 @Injectable()
 export class PostAnalyticsService {

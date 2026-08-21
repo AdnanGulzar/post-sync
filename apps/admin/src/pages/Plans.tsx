@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ApiError, Plan, SocialPlatform } from '@syncpost/api-client';
+import { ALL_PLATFORM_IDS } from '@syncpost/platform-core';
 import {
   Badge,
   Button,
@@ -172,7 +173,7 @@ export default function Plans() {
   const [price, setPrice] = useState(0);
   const [postsLimit, setPostsLimit] = useState<number | null>(null);
   const [connectedAccountsLimit, setConnectedAccountsLimit] = useState<number | null>(null);
-  const [platforms, setPlatforms] = useState<SocialPlatform[]>(['LINKEDIN', 'FACEBOOK', 'X']);
+  const [platforms, setPlatforms] = useState<SocialPlatform[]>([...ALL_PLATFORM_IDS]);
   const [stripePriceId, setStripePriceId] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -215,7 +216,7 @@ export default function Plans() {
       setPrice(0);
       setPostsLimit(null);
       setConnectedAccountsLimit(null);
-      setPlatforms(['LINKEDIN', 'FACEBOOK', 'X']);
+      setPlatforms([...ALL_PLATFORM_IDS]);
       setStripePriceId('');
       setShowCreate(false);
       await load();
