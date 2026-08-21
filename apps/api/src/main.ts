@@ -1,6 +1,7 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module';
+import { userAppUrl, adminAppUrl } from './config/app-urls';
 
 async function bootstrap() {
   // rawBody: true keeps the original request bytes around (on req.rawBody) alongside
@@ -10,8 +11,8 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [
-      process.env.USER_APP_URL || 'http://localhost:4200',
-      process.env.ADMIN_APP_URL || 'http://localhost:4201',
+      userAppUrl(),
+      adminAppUrl(),
     ],
     credentials: true,
   });

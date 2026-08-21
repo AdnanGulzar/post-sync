@@ -7,6 +7,7 @@ import { AuthenticatedUser } from '../common/decorators/authenticated-user';
 import { SocialService } from './social.service';
 import { ParseEntityIdPipe } from '../common/pipes/parse-entity-id.pipe';
 import { errorMessage } from '../common/errors';
+import { userAppUrl } from '../config/app-urls';
 
 @Controller('social')
 export class SocialController {
@@ -35,14 +36,14 @@ export class SocialController {
     @Query('state') state: string,
     @Res() res: Response,
   ) {
-    const userAppUrl = process.env.USER_APP_URL || 'http://localhost:4200';
+    const appUrl = userAppUrl();
     try {
       const accounts = await this.socialService.handleCallback(platform, code, state);
       return res.redirect(
-        `${userAppUrl}/connections?connected=${platform.toLowerCase()}&count=${accounts.length}`,
+        `${appUrl}/connections?connected=${platform.toLowerCase()}&count=${accounts.length}`,
       );
     } catch (err: unknown) {
-      return res.redirect(`${userAppUrl}/connections?error=${encodeURIComponent(errorMessage(err, 'connect_failed'))}`);
+      return res.redirect(`${appUrl}/connections?error=${encodeURIComponent(errorMessage(err, 'connect_failed'))}`);
     }
   }
 
