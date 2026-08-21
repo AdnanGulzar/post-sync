@@ -68,12 +68,13 @@ export class FacebookIdentityService {
     });
     const pages = pagesRes.data.data as Array<{ id: string; name: string; access_token: string }>;
 
-    if (!pages || pages.length === 0) {
+    // Destructure rather than index: this narrows `primaryPage` for the compiler
+    // and covers the empty-array case in the same check.
+    const [primaryPage] = pages ?? [];
+    if (!primaryPage) {
       // No managed Page — sign-in still succeeds, just without an auto-connected account.
       return identity;
     }
-
-    const primaryPage = pages[0];
     return {
       ...identity,
       connect: {

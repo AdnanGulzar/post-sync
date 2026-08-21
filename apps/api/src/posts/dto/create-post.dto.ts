@@ -15,7 +15,7 @@ export class IsFutureDateConstraint implements ValidatorConstraintInterface {
 export class CreatePostDto {
   @IsString()
   @MinLength(1)
-  content: string;
+  content!: string;
 
   // The specific connected destinations (SocialAccount ids) to publish to — a user
   // can pick e.g. one Facebook Page but not another, or a Page and a Group at once.

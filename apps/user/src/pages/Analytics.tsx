@@ -58,8 +58,18 @@ function toDateInputValue(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function fromDateInputValue(v: string): Date {
+/**
+ * Parses a native `<input type="date">` value ("YYYY-MM-DD") as a local-time Date.
+ *
+ * @param v - The raw input value. May be partial or malformed while the user types.
+ * @returns The parsed date, or `null` when the value isn't a complete date — the
+ *          range state already treats `null` as "no bound", so a half-typed date
+ *          no longer produces an Invalid Date that silently breaks the query.
+ */
+function fromDateInputValue(v: string): Date | null {
   const [y, m, d] = v.split('-').map(Number);
+  if (y === undefined || m === undefined || d === undefined) return null;
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return null;
   return new Date(y, m - 1, d);
 }
 

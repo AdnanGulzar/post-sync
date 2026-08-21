@@ -442,7 +442,11 @@ export class PostsService {
 
     await Promise.all(
       outcomes.map((outcome, i) => {
+        // Promise.allSettled preserves input order, so this index is always
+        // populated; the guard exists to satisfy noUncheckedIndexedAccess
+        // rather than to handle a reachable case.
         const account = destinations[i];
+        if (!account) return Promise.resolve(null);
         if (outcome.status === 'fulfilled') {
           return this.prisma.postPublishResult.upsert({
             where: { postId_socialAccountId: { postId: post.id, socialAccountId: account.id } },

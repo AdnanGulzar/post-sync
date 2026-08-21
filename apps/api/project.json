@@ -3,7 +3,9 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/api/src",
   "projectType": "application",
-  "tags": [],
+  "tags": [
+    "scope:api"
+  ],
   "targets": {
     "build": {
       "executor": "nx:run-commands",
@@ -77,8 +79,14 @@
       }
     },
     "test": {
+      "options": {}
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
       "options": {
-        "passWithNoTests": true
+        "command": "tsc -p tsconfig.app.json --noEmit",
+        "cwd": "apps/api"
       }
     }
   }

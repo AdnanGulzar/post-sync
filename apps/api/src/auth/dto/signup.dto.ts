@@ -2,15 +2,15 @@ import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class SignupDto {
   @IsEmail()
-  email: string;
+  email!: string;
 
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 
   @IsString()
   @MinLength(2)
-  name: string;
+  name!: string;
 
   // Plan choice now happens on the /billing page right after account creation,
   // not in the signup form itself — omitted here means "start on the default
