@@ -1,4 +1,4 @@
-# SyncPost — MVP
+# SyncPost — MVP with instagram
 
 An Nx monorepo with three apps:
 
