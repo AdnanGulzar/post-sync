@@ -11,6 +11,7 @@ import { PostsModule } from '../posts/posts.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { StripeModule } from '../stripe/stripe.module';
 import { validateEnv } from '../config/env.validation';
+import { PublishingModule } from '../publishing/publishing.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { validateEnv } from '../config/env.validation';
     SubscriptionsModule,
     SocialModule,
     PostsModule,
+    PublishingModule,
     UploadsModule,
     StripeModule,
   ],

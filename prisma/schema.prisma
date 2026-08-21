@@ -39,9 +39,15 @@ enum PostStatus {
   PARTIAL
 }
 
+/// Lifecycle of one destination within a post.
+///
+/// RETRYING distinguishes "failed but will be re-attempted" from a terminal
+/// FAILED. Without it every failure looked permanent and nothing was ever
+/// retried, however transient the cause.
 enum PublishStatus {
   PENDING
   SUCCESS
+  RETRYING
   FAILED
 }
 
@@ -215,9 +221,20 @@ model PostPublishResult {
   platformPostId  String?
   error           String?
   publishedAt     DateTime?
+
+  /// How many publish attempts this destination has had. Capped by the worker
+  /// so a permanently broken destination cannot retry forever.
+  attemptCount    Int            @default(0)
+  /// When the worker may next attempt this destination. Null means "not
+  /// scheduled for retry" — either it succeeded or it failed permanently.
+  nextRetryAt     DateTime?
+
   createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@unique([postId, socialAccountId])
   @@index([postId])
+  /// Drives the retry sweep.
+  @@index([status, nextRetryAt])
   @@map("post_publish_results")
 }

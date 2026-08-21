@@ -8,5 +8,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
   imports: [SocialModule, SubscriptionsModule],
   controllers: [PostsController],
   providers: [PostsService],
+  // PublishingWorker drives scheduled publishing through this service.
+  exports: [PostsService],
 })
 export class PostsModule {}

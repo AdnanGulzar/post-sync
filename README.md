@@ -282,6 +282,8 @@ flowchart LR
 | `JWT_SECRET` | ≥ 32 chars, not a placeholder | Signs auth tokens |
 | `TOKEN_ENCRYPTION_KEY` | ≥ 32 chars, **≠ `JWT_SECRET`** | AES-256-GCM key for stored OAuth tokens |
 
+**Optional:** `WORKER_ENABLED=false` turns off scheduled publishing on a pod, so API and worker instances can be scaled separately. Defaults to enabled.
+
 ```mermaid
 flowchart LR
     BOOT["🚀 Boot"] --> VAL{"validateEnv"}
@@ -407,24 +409,37 @@ Facebook Pages are handed to Meta to publish; everything else is held and publis
 ```mermaid
 flowchart TD
     S["🗓️ Schedule post"] --> Q{"descriptor<br/>nativeScheduling<br/>includes this<br/>destination type?"}
-    Q -->|"✅ Facebook Page"| META["Send now with<br/>published=false +<br/>scheduled_publish_time"]
-    Q -->|"❌ everything else"| OWN["Post status = SCHEDULED"]
+    Q -->|"✅ Facebook Page"| META["Hand to Meta<br/>published=false +<br/>scheduled_publish_time"]
+    Q -->|"❌ everything else"| OWN["status = SCHEDULED"]
 
     META --> PEND["Result = PENDING"]
-    OWN --> CRON["⏱️ @Cron every minute"]
-    CRON --> CLAIM{"Atomic claim<br/>SCHEDULED → PUBLISHING"}
-    CLAIM -->|lost race| SKIP["Skip — another<br/>instance owns it"]
-    CLAIM -->|won| PUB["Publish via registry"]
-    PUB --> FIN["Finalize status"]
-    PEND --> FIN
+    OWN --> TICK["⏱️ Worker tick — every minute"]
 
-    style META fill:#1877F2,color:#fff
-    style CRON fill:#E0234E,color:#fff
-    style FIN fill:#22c55e,color:#000
+    subgraph worker["PublishingWorker"]
+        direction TB
+        TICK --> REAP["1️⃣ Reap stale PUBLISHING<br/>> 15 min → back to SCHEDULED"]
+        REAP --> CLAIM["2️⃣ Claim due posts<br/>FOR UPDATE SKIP LOCKED"]
+        CLAIM --> RETRY["3️⃣ Retry destinations<br/>whose backoff elapsed"]
+    end
+
+    CLAIM --> PUB["Publish via registry<br/>skips already-SUCCESS<br/>destinations"]
+    RETRY --> PUB
+    PUB --> OUT{"outcome"}
+    OUT -->|"✅"| OK["SUCCESS"]
+    OUT -->|"429 / 5xx / timeout"| BACK["RETRYING<br/>exponential backoff,<br/>honours Retry-After"]
+    OUT -->|"401 / 4xx / cap hit"| DEAD["FAILED — terminal"]
+    BACK -.->|next tick| RETRY
+
+    OK & DEAD & PEND --> FIN["Recompute post status<br/>PUBLISHED · PARTIAL · FAILED"]
+
+    style REAP fill:#f59e0b,color:#000
+    style OK fill:#22c55e,color:#000
+    style DEAD fill:#ef4444,color:#fff
+    style BACK fill:#3b82f6,color:#fff
 ```
 
-> [!WARNING]
-> **Known gap.** If the process dies between claiming a post and finalising it, that post stays `PUBLISHING` forever — the cron only queries `SCHEDULED` and there is no stale-claim reaper yet. Tracked as the next piece of work.
+> [!TIP]
+> **Crash recovery.** If a process dies mid-publish, the post is left in `PUBLISHING`. The reaper returns anything stuck there for over 15 minutes to the queue, and re-publishing skips destinations that already succeeded — so recovery completes the remaining targets instead of double-posting.
 
 ### 4. Token lifecycle
 
@@ -711,6 +726,8 @@ npx nx run platform-core:test    # registry + content adaptation
 | 🔑 `token-vault` | Refresh-on-expiry, rotated refresh tokens, **concurrent refresh collapses to one**, `NEEDS_RECONNECT` on failure |
 | ✅ `env.validation` | Every boot rule, including reporting all problems at once |
 | 👮 `roles.guard` | Allow, deny, and the unauthenticated edge case |
+| ♻️ `retry-policy` | Which failures retry, exponential backoff, `Retry-After`, attempt cap |
+| 🧯 `publishing.worker` *(integration)* | Crash recovery, and that concurrent workers never claim one post twice — needs a real database |
 | 🧱 `app.module` | **Compiles the entire DI graph** |
 | 🆔 `parse-entity-id.pipe` | Accepts seeded well-known IDs, rejects malformed ones |
 
@@ -737,7 +754,6 @@ npx nx run platform-core:test    # registry + content adaptation
 
 These are tracked, not hidden:
 
-- **Stale `PUBLISHING` posts** — no reaper yet; a process death mid-publish wedges a post
 - **No rate limiting** — `@nestjs/throttler` not yet added; login and signup are unthrottled
 - **No global exception filter** — Prisma errors can surface as 500s with internal detail
 - **Auth is opt-in per controller** — a new controller is public until `@UseGuards` is added
