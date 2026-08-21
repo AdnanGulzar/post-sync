@@ -6,6 +6,12 @@ import { BasePublisher } from './publishers/base-publisher';
 import { HttpClient } from './publishers/http-client';
 import { codeChallengeFor } from './publishers/pkce';
 import type { PlatformPublisher } from './publishers/publisher.registry';
+import type {
+  RefreshableTokenSource,
+  RefreshedTokens,
+  StoredCredentials,
+} from './tokens/refreshable';
+import { PermanentError } from './publishers/publisher.errors';
 
 const AUTHORIZE_URL = 'https://twitter.com/i/oauth2/authorize';
 const TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
@@ -22,7 +28,10 @@ interface TokenResponse {
 }
 
 @Injectable()
-export class TwitterService extends BasePublisher implements PlatformPublisher {
+export class TwitterService
+  extends BasePublisher
+  implements PlatformPublisher, RefreshableTokenSource
+{
   readonly descriptor = PLATFORMS.X;
 
   private readonly clientId = process.env.X_CLIENT_ID || '';
@@ -85,6 +94,44 @@ export class TwitterService extends BasePublisher implements PlatformPublisher {
         tokenExpiresAt: this.expiresAt(token.expires_in),
       },
     ];
+  }
+
+  /**
+   * Exchanges a refresh token for a new access token.
+   *
+   * X access tokens last roughly two hours, so this is the difference between
+   * publishing working and the user reconnecting several times a day. X rotates
+   * the refresh token on every use, so the returned one must be persisted or the
+   * next refresh fails.
+   *
+   * @param current - The account's stored credentials; X uses `refreshToken`.
+   * @returns New credentials, including the rotated refresh token.
+   * @throws {TokenExpiredError} If X rejects the refresh token.
+   */
+  async refreshTokens(current: StoredCredentials): Promise<RefreshedTokens> {
+    if (!current.refreshToken) {
+      throw new PermanentError(this.descriptor.label, 'no refresh token stored for this account');
+    }
+    const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+    const token = await this.request<TokenResponse>({
+      method: 'POST',
+      url: TOKEN_URL,
+      data: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: current.refreshToken,
+        client_id: this.clientId,
+      }),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basicAuth}`,
+      },
+    });
+
+    return {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: this.expiresAt(token.expires_in),
+    };
   }
 
   async publish(account: SocialAccount, content: string): Promise<PublishResult> {

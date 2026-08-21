@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DestinationType, Prisma, SocialPlatform } from '@prisma/client';
+import { DestinationType, Prisma, SocialAccount, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OAuthStateService } from './oauth-state.service';
 import { PublisherRegistry } from './publishers/publisher.registry';
+import { TokenVault } from './tokens/token-vault';
 import { createCodeVerifier } from './publishers/pkce';
 import { PLATFORMS } from '@syncpost/platform-core';
 import { SocialPlatformService, PublishResult, PostMetrics } from './publisher.interface';
@@ -13,6 +14,7 @@ export class SocialService {
     private prisma: PrismaService,
     private stateService: OAuthStateService,
     private registry: PublisherRegistry,
+    private vault: TokenVault,
   ) {}
 
   /**
@@ -80,17 +82,17 @@ export class SocialService {
             destinationType: result.destinationType,
             platformUserId: result.platformUserId,
             platformUsername: result.platformUsername,
-            accessToken: result.accessToken,
-            refreshToken: result.refreshToken,
+            ...this.vault.encryptForStorage(result.accessToken, result.refreshToken),
             tokenExpiresAt: result.tokenExpiresAt,
             metadata: (result.metadata as Prisma.InputJsonValue) ?? undefined,
           },
           update: {
             destinationType: result.destinationType,
             platformUsername: result.platformUsername,
-            accessToken: result.accessToken,
-            refreshToken: result.refreshToken,
+            ...this.vault.encryptForStorage(result.accessToken, result.refreshToken),
             tokenExpiresAt: result.tokenExpiresAt,
+            // Reconnecting clears a previous NEEDS_RECONNECT.
+            status: 'ACTIVE',
             metadata: (result.metadata as Prisma.InputJsonValue) ?? undefined,
           },
         }),
@@ -138,24 +140,39 @@ export class SocialService {
   async publish(userId: string, destinationId: string, content: string, imageUrl?: string, scheduledAt?: Date): Promise<PublishResult> {
     const account = await this.accountFor(userId, destinationId);
     const service = this.serviceFor(account.platform);
-    return service.publish(account, content, imageUrl, scheduledAt);
+    return service.publish(await this.usable(account), content, imageUrl, scheduledAt);
   }
 
   async deletePost(userId: string, destinationId: string, platformPostId: string): Promise<void> {
     const account = await this.accountFor(userId, destinationId);
     const service = this.serviceFor(account.platform);
-    return service.deletePost(account, platformPostId);
+    return service.deletePost(await this.usable(account), platformPostId);
   }
 
   async editPost(userId: string, destinationId: string, platformPostId: string, content: string): Promise<void> {
     const account = await this.accountFor(userId, destinationId);
     const service = this.serviceFor(account.platform);
-    return service.editPost(account, platformPostId, content);
+    return service.editPost(await this.usable(account), platformPostId, content);
   }
 
   async getMetrics(userId: string, destinationId: string, platformPostId: string): Promise<PostMetrics> {
     const account = await this.accountFor(userId, destinationId);
     const service = this.serviceFor(account.platform);
-    return service.getMetrics(account, platformPostId);
+    return service.getMetrics(await this.usable(account), platformPostId);
+  }
+
+  /**
+   * Prepares an account for a provider call.
+   *
+   * Publishers read `account.accessToken` directly, but the stored column holds
+   * ciphertext. This returns a copy carrying a decrypted, non-expired token, so
+   * refresh happens in one place instead of in every publisher.
+   *
+   * @param account - The account as stored.
+   * @returns A copy safe to hand to a publisher.
+   * @throws {TokenExpiredError} If the token is expired and cannot be refreshed.
+   */
+  private async usable(account: SocialAccount): Promise<SocialAccount> {
+    return { ...account, accessToken: await this.vault.getValidAccessToken(account) };
   }
 }

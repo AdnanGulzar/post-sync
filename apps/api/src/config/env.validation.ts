@@ -17,7 +17,7 @@
  */
 
 /** Variables without which the API cannot serve a single authenticated request. */
-const REQUIRED = ['DATABASE_URL', 'JWT_SECRET'] as const;
+const REQUIRED = ['DATABASE_URL', 'JWT_SECRET', 'TOKEN_ENCRYPTION_KEY'] as const;
 
 /**
  * Minimum JWT secret length. Below this a secret is brute-forceable offline,
@@ -55,6 +55,21 @@ export function validateEnv(config: Record<string, unknown>): Record<string, unk
     }
     if (FORBIDDEN_JWT_SECRETS.includes(jwtSecret)) {
       problems.push('JWT_SECRET is still set to a documented placeholder value.');
+    }
+  }
+
+  const encryptionKey = config['TOKEN_ENCRYPTION_KEY'];
+  if (typeof encryptionKey === 'string' && encryptionKey.trim() !== '') {
+    if (encryptionKey.length < MIN_JWT_SECRET_LENGTH) {
+      problems.push(
+        `TOKEN_ENCRYPTION_KEY must be at least ${MIN_JWT_SECRET_LENGTH} characters ` +
+          `(got ${encryptionKey.length}). It is the only thing protecting stored OAuth tokens.`,
+      );
+    }
+    if (encryptionKey === config['JWT_SECRET']) {
+      // Distinct keys mean rotating one does not force rotating the other, and a
+      // leaked signing key does not also decrypt every stored token.
+      problems.push('TOKEN_ENCRYPTION_KEY must not be the same value as JWT_SECRET.');
     }
   }
 

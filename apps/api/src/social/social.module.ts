@@ -6,6 +6,8 @@ import { LinkedInService } from './linkedin.service';
 import { FacebookService } from './facebook.service';
 import { TwitterService } from './twitter.service';
 import { HttpClient } from './publishers/http-client';
+import { TokenCrypto } from './tokens/token-crypto';
+import { TokenVault } from './tokens/token-vault';
 import {
   PLATFORM_PUBLISHER,
   PublisherRegistry,
@@ -27,6 +29,14 @@ const PUBLISHERS = [LinkedInService, FacebookService, TwitterService];
     OAuthStateService,
     HttpClient,
     PublisherRegistry,
+    {
+      // Provided by factory, not by class: TokenCrypto's constructor takes an
+      // optional secret so tests can pass one, and Nest would otherwise try to
+      // resolve `String` from the container and fail at boot.
+      provide: TokenCrypto,
+      useFactory: () => new TokenCrypto(),
+    },
+    TokenVault,
     ...PUBLISHERS,
     {
       // Nest has no `multi: true` (that is an Angular concept) — collecting
@@ -37,6 +47,6 @@ const PUBLISHERS = [LinkedInService, FacebookService, TwitterService];
       inject: [...PUBLISHERS],
     },
   ],
-  exports: [SocialService],
+  exports: [SocialService, TokenVault],
 })
 export class SocialModule {}

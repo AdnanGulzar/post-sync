@@ -4,6 +4,11 @@ import { SocialAccount } from '@prisma/client';
 import { PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
 import { PLATFORMS } from '@syncpost/platform-core';
 import type { PlatformPublisher } from './publishers/publisher.registry';
+import type {
+  RefreshableTokenSource,
+  RefreshedTokens,
+  StoredCredentials,
+} from './tokens/refreshable';
 import { BasePublisher } from './publishers/base-publisher';
 import { HttpClient } from './publishers/http-client';
 import { PermanentError } from './publishers/publisher.errors';
@@ -55,7 +60,10 @@ interface GroupEntry {
  * users can connect.
  */
 @Injectable()
-export class FacebookService extends BasePublisher implements PlatformPublisher {
+export class FacebookService
+  extends BasePublisher
+  implements PlatformPublisher, RefreshableTokenSource
+{
   readonly descriptor = PLATFORMS.FACEBOOK;
 
   private readonly clientId = process.env.FACEBOOK_APP_ID || '';
@@ -169,6 +177,32 @@ export class FacebookService extends BasePublisher implements PlatformPublisher 
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Extends a long-lived token's life.
+   *
+   * Meta has no refresh grant; instead an unexpired long-lived token can be
+   * re-exchanged for a fresh one, resetting the ~60 day clock. That only works
+   * while the current token is still valid, which is why TokenVault refreshes
+   * ahead of expiry rather than on failure.
+   *
+   * @param current - The account's stored credentials. Meta has no refresh
+   *                  token, so this consumes `accessToken` as fb_exchange_token.
+   * @returns A newly issued long-lived token.
+   */
+  async refreshTokens(current: StoredCredentials): Promise<RefreshedTokens> {
+    const token = await this.request<TokenResponse>({
+      method: 'GET',
+      url: `${GRAPH_BASE}/oauth/access_token`,
+      params: {
+        grant_type: 'fb_exchange_token',
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+        fb_exchange_token: current.accessToken,
+      },
+    });
+    return { accessToken: token.access_token, expiresAt: this.expiresAt(token.expires_in) };
   }
 
   // Facebook natively schedules Page feed/photo posts: passing published=false +

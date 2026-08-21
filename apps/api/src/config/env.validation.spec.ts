@@ -3,6 +3,7 @@ import { validateEnv } from './env.validation';
 const VALID = {
   DATABASE_URL: 'postgresql://localhost:5432/syncpost',
   JWT_SECRET: 'a'.repeat(48),
+  TOKEN_ENCRYPTION_KEY: 'b'.repeat(48),
 };
 
 describe('validateEnv', () => {
@@ -34,6 +35,26 @@ describe('validateEnv', () => {
   it('rejects a missing DATABASE_URL', () => {
     const { DATABASE_URL: _omitted, ...withoutDb } = VALID;
     expect(() => validateEnv(withoutDb)).toThrow(/DATABASE_URL is required/);
+  });
+
+  it('rejects a missing TOKEN_ENCRYPTION_KEY', () => {
+    // Without it, OAuth tokens would have to be stored in plaintext.
+    const { TOKEN_ENCRYPTION_KEY: _omitted, ...withoutKey } = VALID;
+    expect(() => validateEnv(withoutKey)).toThrow(/TOKEN_ENCRYPTION_KEY is required/);
+  });
+
+  it('rejects a short TOKEN_ENCRYPTION_KEY', () => {
+    expect(() => validateEnv({ ...VALID, TOKEN_ENCRYPTION_KEY: 'short' })).toThrow(
+      /TOKEN_ENCRYPTION_KEY must be at least 32 characters/,
+    );
+  });
+
+  it('rejects reusing JWT_SECRET as the encryption key', () => {
+    // Separate keys mean a leaked signing key does not also decrypt every
+    // stored token, and either can be rotated independently.
+    expect(() =>
+      validateEnv({ ...VALID, TOKEN_ENCRYPTION_KEY: VALID.JWT_SECRET }),
+    ).toThrow(/must not be the same value as JWT_SECRET/);
   });
 
   it('rejects a non-numeric PORT', () => {
