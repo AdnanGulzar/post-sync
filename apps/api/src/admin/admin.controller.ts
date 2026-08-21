@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/decorators/authenticated-user';
 import { AdminService } from './admin.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { GrantSubscriptionDto } from './dto/grant-subscription.dto';
@@ -20,13 +21,13 @@ export class AdminController {
   }
 
   @Post('users')
-  createUser(@CurrentUser() admin: any, @Body() dto: CreateUserDto) {
+  createUser(@CurrentUser() admin: AuthenticatedUser, @Body() dto: CreateUserDto) {
     return this.adminService.createUser(admin.id, dto);
   }
 
   @Patch('users/:id/subscription')
   grantSubscription(
-    @CurrentUser() admin: any,
+    @CurrentUser() admin: AuthenticatedUser,
     @Param('id', ParseEntityIdPipe) userId: string,
     @Body() dto: GrantSubscriptionDto,
   ) {

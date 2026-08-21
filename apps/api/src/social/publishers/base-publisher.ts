@@ -1,4 +1,4 @@
-import { AxiosError, AxiosRequestConfig, isAxiosError } from 'axios';
+import { AxiosError, AxiosRequestConfig, AxiosResponse, isAxiosError } from 'axios';
 import type { PlatformDescriptor } from '@syncpost/platform-core';
 import { HttpClient, retryAfterMsFrom } from './http-client';
 import {
@@ -52,6 +52,21 @@ export abstract class BasePublisher {
   protected async request<T>(config: AxiosRequestConfig): Promise<T> {
     try {
       return await this.http.request<T>(config);
+    } catch (err: unknown) {
+      throw this.translate(err);
+    }
+  }
+
+  /**
+   * As {@link BasePublisher.request}, but returns the whole response so a
+   * caller can read headers. Same error translation applies.
+   *
+   * @param config - Axios request config.
+   * @returns The full axios response.
+   */
+  protected async requestRaw<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    try {
+      return await this.http.requestRaw<T>(config);
     } catch (err: unknown) {
       throw this.translate(err);
     }

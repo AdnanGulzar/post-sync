@@ -40,11 +40,10 @@ export default [
       '**/*.mjs',
     ],
     rules: {
-      // `any` re-opens every hole strict mode just closed. Currently a warning
-      // because the 16 `catch (err: any)` blocks in the social publishers are
-      // deleted wholesale by BasePublisher's typed error mapping; promote to
-      // 'error' once that lands and the count reaches zero.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // `any` re-opens every hole strict mode just closed. Landed as a warning
+      // while the social publishers still had their catch (err: any) blocks;
+      // those are gone and the count is zero, so it is an error now.
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
   {

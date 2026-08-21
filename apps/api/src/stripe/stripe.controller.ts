@@ -18,9 +18,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PlansService } from '../subscriptions/plans.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/decorators/authenticated-user';
 import { StripeService } from './stripe.service';
 import { CheckoutSessionDto } from './dto/checkout-session.dto';
 import { ChangePlanDto } from './dto/change-plan.dto';
+import { errorMessage } from '../common/errors';
 
 @Controller('stripe')
 export class StripeController {
@@ -39,8 +41,8 @@ export class StripeController {
     let event: Stripe.Event;
     try {
       event = this.stripeService.constructEvent(req.rawBody, signature);
-    } catch (err: any) {
-      throw new BadRequestException(`Webhook signature verification failed: ${err.message}`);
+    } catch (err: unknown) {
+      throw new BadRequestException(`Webhook signature verification failed: ${errorMessage(err)}`);
     }
 
     switch (event.type) {
@@ -68,7 +70,7 @@ export class StripeController {
   // activate synchronously against Stripe instead of waiting on the webhook.
   @UseGuards(JwtAuthGuard)
   @Get('checkout-session/:sessionId')
-  async checkSession(@CurrentUser() user: any, @Param('sessionId') sessionId: string) {
+  async checkSession(@CurrentUser() user: AuthenticatedUser, @Param('sessionId') sessionId: string) {
     const session = await this.stripeService.retrieveCheckoutSession(sessionId);
     if (session.metadata?.userId !== user.id) throw new ForbiddenException();
 
@@ -84,7 +86,7 @@ export class StripeController {
   // switch to a different paid plan (planId in the body, from the billing page).
   @UseGuards(JwtAuthGuard)
   @Post('checkout-session')
-  async createCheckoutSession(@CurrentUser() user: any, @Body() dto: CheckoutSessionDto) {
+  async createCheckoutSession(@CurrentUser() user: AuthenticatedUser, @Body() dto: CheckoutSessionDto) {
     const planId = dto.planId;
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId: user.id },
@@ -126,7 +128,7 @@ export class StripeController {
   // subscription must be cancelled so they stop being billed for it.
   @UseGuards(JwtAuthGuard)
   @Patch('change-plan')
-  async changePlan(@CurrentUser() user: any, @Body() dto: ChangePlanDto) {
+  async changePlan(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePlanDto) {
     const planId = dto.planId;
 
     const subscription = await this.prisma.subscription.findUnique({ where: { userId: user.id } });

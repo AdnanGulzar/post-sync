@@ -1,12 +1,15 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import axios from 'axios';
+import { Injectable } from '@nestjs/common';
 import FormData from 'form-data';
 import { SocialAccount } from '@prisma/client';
 import { PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
 import { PLATFORMS } from '@syncpost/platform-core';
 import type { PlatformPublisher } from './publishers/publisher.registry';
+import { BasePublisher } from './publishers/base-publisher';
+import { HttpClient } from './publishers/http-client';
+import { PermanentError } from './publishers/publisher.errors';
 
 const GRAPH_VERSION = 'v19.0';
+const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 // Off by default: publish_to_groups is an Advanced Access permission Meta rarely
 // grants to third-party apps, and a group's own admins additionally have to add
@@ -17,43 +20,72 @@ const GRAPH_VERSION = 'v19.0';
 // listed as usable in your app's Permissions and Features page.
 const GROUPS_ENABLED = process.env.FACEBOOK_ENABLE_GROUPS === 'true';
 
+const PAGE_SCOPES = ['pages_show_list', 'pages_manage_posts', 'pages_read_engagement'];
+const GROUP_SCOPES = ['publish_to_groups', 'groups_access_member_info'];
+
+interface TokenResponse {
+  access_token: string;
+  expires_in?: number;
+}
+
+interface PageEntry {
+  id: string;
+  name: string;
+  access_token: string;
+}
+
+interface GroupEntry {
+  id: string;
+  name: string;
+}
+
 /**
  * Facebook Page (and optionally Group) posting via the Graph API.
- * "Connecting Facebook" discovers every Page the person manages — and, only if
- * FACEBOOK_ENABLE_GROUPS=true, every Group they admin that has approved this app —
- * and returns one destination per one, each stored as its own SocialAccount row.
- * Meta doesn't support posting to personal profile timelines at all via the API.
  *
- * Requires a Meta Business-type app with "Facebook Login" (or "Facebook Login for
- * Business") set up, and pages_show_list + pages_manage_posts + pages_read_engagement
- * permissions (Standard Access works for the app's own admins/testers; App Review is
- * needed before other users can connect). Group posting additionally needs
- * publish_to_groups + groups_access_member_info, which are far more restricted.
+ * Connecting discovers every Page the person manages — and, only when
+ * FACEBOOK_ENABLE_GROUPS=true, every Group they admin that has approved this app
+ * — returning one destination each, stored as its own SocialAccount row. Meta
+ * does not support posting to personal profile timelines through the API at all,
+ * which is why the descriptor's media and scheduling capabilities are expressed
+ * per destination type rather than per platform.
+ *
+ * Requires a Meta Business-type app with Facebook Login and
+ * pages_show_list + pages_manage_posts + pages_read_engagement. Standard Access
+ * covers the app's own admins and testers; App Review is needed before other
+ * users can connect.
  */
 @Injectable()
-export class FacebookService implements PlatformPublisher {
+export class FacebookService extends BasePublisher implements PlatformPublisher {
   readonly descriptor = PLATFORMS.FACEBOOK;
 
-  private clientId = process.env.FACEBOOK_APP_ID || '';
-  private clientSecret = process.env.FACEBOOK_APP_SECRET || '';
-  private redirectUri = process.env.FACEBOOK_REDIRECT_URI || '';
+  private readonly clientId = process.env.FACEBOOK_APP_ID || '';
+  private readonly clientSecret = process.env.FACEBOOK_APP_SECRET || '';
+  private readonly redirectUri = process.env.FACEBOOK_REDIRECT_URI || '';
+
+  constructor(http: HttpClient) {
+    super(http);
+  }
+
+  /** Meta nests the reason under `error.message`. */
+  protected errorDetail(body: unknown): string | undefined {
+    return (body as { error?: { message?: string } } | undefined)?.error?.message;
+  }
 
   getAuthUrl(state: string): string {
-    const scopes = ['pages_show_list', 'pages_manage_posts', 'pages_read_engagement'];
-    if (GROUPS_ENABLED) scopes.push('publish_to_groups', 'groups_access_member_info');
-
-    const params = new URLSearchParams({
+    const scopes = GROUPS_ENABLED ? [...PAGE_SCOPES, ...GROUP_SCOPES] : PAGE_SCOPES;
+    return this.authUrl(`https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`, {
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
       state,
       scope: scopes.join(','),
       response_type: 'code',
     });
-    return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params.toString()}`;
   }
 
   async handleCallback(code: string): Promise<ConnectedDestination[]> {
-    const tokenRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`, {
+    const shortLived = await this.request<TokenResponse>({
+      method: 'GET',
+      url: `${GRAPH_BASE}/oauth/access_token`,
       params: {
         client_id: this.clientId,
         client_secret: this.clientSecret,
@@ -62,27 +94,28 @@ export class FacebookService implements PlatformPublisher {
       },
     });
 
-    const shortLivedToken = tokenRes.data.access_token;
-
     // Exchange for a long-lived user token (~60 days) so publishing keeps working.
-    const longLivedRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`, {
+    const longLived = await this.request<TokenResponse>({
+      method: 'GET',
+      url: `${GRAPH_BASE}/oauth/access_token`,
       params: {
         grant_type: 'fb_exchange_token',
         client_id: this.clientId,
         client_secret: this.clientSecret,
-        fb_exchange_token: shortLivedToken,
+        fb_exchange_token: shortLived.access_token,
       },
     });
-    const userAccessToken = longLivedRes.data.access_token;
-    const expiresIn = longLivedRes.data.expires_in as number | undefined;
-    const tokenExpiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined;
 
-    const pagesRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/me/accounts`, {
+    const userAccessToken = longLived.access_token;
+    const tokenExpiresAt = this.expiresAt(longLived.expires_in);
+
+    const pagesRes = await this.request<{ data?: PageEntry[] }>({
+      method: 'GET',
+      url: `${GRAPH_BASE}/me/accounts`,
       params: { access_token: userAccessToken },
     });
-    const pages = (pagesRes.data.data as Array<{ id: string; name: string; access_token: string }>) || [];
 
-    const destinations: ConnectedDestination[] = pages.map((page) => ({
+    const destinations: ConnectedDestination[] = (pagesRes.data ?? []).map((page) => ({
       platformUserId: page.id,
       platformUsername: page.name,
       destinationType: 'PAGE',
@@ -92,120 +125,153 @@ export class FacebookService implements PlatformPublisher {
     }));
 
     if (GROUPS_ENABLED) {
-      try {
-        const groupsRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/me/groups`, {
-          params: { fields: 'id,name,administrator', access_token: userAccessToken },
-        });
-        const groups = (groupsRes.data.data as Array<{ id: string; name: string; administrator?: boolean }>) || [];
-        for (const group of groups) {
-          destinations.push({
-            platformUserId: group.id,
-            platformUsername: group.name,
-            destinationType: 'GROUP',
-            // Groups post with the user's own long-lived token, not a page token.
-            accessToken: userAccessToken,
-            tokenExpiresAt,
-            metadata: { kind: 'group' },
-          });
-        }
-      } catch {
-        // publish_to_groups not actually granted, or no eligible groups — degrade
-        // gracefully rather than failing the whole connect attempt over an optional extra.
-      }
+      destinations.push(...(await this.discoverGroups(userAccessToken, tokenExpiresAt)));
     }
 
     if (destinations.length === 0) {
-      throw new InternalServerErrorException(
-        'No Facebook Pages found for this account. You need to manage at least one Page to publish.',
+      throw new PermanentError(
+        this.descriptor.label,
+        'no Pages found for this account. You need to manage at least one Page to publish.',
       );
     }
 
     return destinations;
   }
 
+  /**
+   * Finds Groups the user administers that have approved this app.
+   *
+   * @param userAccessToken - The long-lived user token; Groups post with this
+   *                          rather than with a Page token.
+   * @param tokenExpiresAt - Expiry carried over from the token exchange.
+   * @returns Group destinations, or an empty list if the permission was not
+   *          actually granted — connecting should still succeed on Pages alone
+   *          rather than failing over an optional extra.
+   */
+  private async discoverGroups(
+    userAccessToken: string,
+    tokenExpiresAt: Date | undefined,
+  ): Promise<ConnectedDestination[]> {
+    try {
+      const res = await this.request<{ data?: GroupEntry[] }>({
+        method: 'GET',
+        url: `${GRAPH_BASE}/me/groups`,
+        params: { fields: 'id,name,administrator', access_token: userAccessToken },
+      });
+      return (res.data ?? []).map((group) => ({
+        platformUserId: group.id,
+        platformUsername: group.name,
+        destinationType: 'GROUP' as const,
+        accessToken: userAccessToken,
+        tokenExpiresAt,
+        metadata: { kind: 'group' },
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   // Facebook natively schedules Page feed/photo posts: passing published=false +
   // scheduled_publish_time (unix seconds, 10 min - 75 days out) makes Meta hold and
   // auto-publish the post itself. Groups don't support this — always publish immediately.
-  async publish(account: SocialAccount, content: string, imageUrl?: string, scheduledAt?: Date): Promise<PublishResult> {
-    const canSchedule = scheduledAt && account.destinationType === 'PAGE';
+  async publish(
+    account: SocialAccount,
+    content: string,
+    imageUrl?: string,
+    scheduledAt?: Date,
+  ): Promise<PublishResult> {
+    const canSchedule =
+      scheduledAt !== undefined &&
+      this.descriptor.capabilities.nativeScheduling.includes(account.destinationType);
+
+    if (imageUrl) {
+      return this.publishPhoto(account, content, imageUrl, canSchedule ? scheduledAt : undefined);
+    }
+
     const scheduleParams = canSchedule
       ? { published: false, scheduled_publish_time: Math.floor(scheduledAt.getTime() / 1000) }
       : {};
 
-    try {
-      if (imageUrl) {
-        // Fetch the image ourselves and upload the bytes directly, rather than passing
-        // `url` and making Facebook's servers fetch it — that fails for anything not
-        // publicly reachable from Meta's side (e.g. a local dev upload at localhost).
-        const imageRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-        const form = new FormData();
-        form.append('source', Buffer.from(imageRes.data), { filename: 'image.jpg' });
-        form.append('caption', content);
-        form.append('access_token', account.accessToken);
-        if (canSchedule) {
-          form.append('published', 'false');
-          form.append('scheduled_publish_time', String(Math.floor(scheduledAt.getTime() / 1000)));
-        }
+    const res = await this.request<{ id: string }>({
+      method: 'POST',
+      url: `${GRAPH_BASE}/${account.platformUserId}/feed`,
+      params: { message: content, access_token: account.accessToken, ...scheduleParams },
+    });
+    return { platformPostId: res.id };
+  }
 
-        const res = await axios.post(`https://graph.facebook.com/${GRAPH_VERSION}/${account.platformUserId}/photos`, form, {
-          headers: form.getHeaders(),
-        });
-        return { platformPostId: res.data.post_id || res.data.id };
-      }
+  /**
+   * Publishes a post with an image.
+   *
+   * Fetches the image and uploads the bytes rather than passing `url` and letting
+   * Meta's servers fetch it, which fails for anything not publicly reachable from
+   * Meta's side — a local dev upload on localhost, for instance.
+   */
+  private async publishPhoto(
+    account: SocialAccount,
+    content: string,
+    imageUrl: string,
+    scheduledAt: Date | undefined,
+  ): Promise<PublishResult> {
+    const image = await this.request<ArrayBuffer>({
+      method: 'GET',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+    });
 
-      const res = await axios.post(`https://graph.facebook.com/${GRAPH_VERSION}/${account.platformUserId}/feed`, null, {
-        params: { message: content, access_token: account.accessToken, ...scheduleParams },
-      });
-      return { platformPostId: res.data.id };
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `Facebook publish failed: ${err.response?.data?.error?.message || err.message}`,
-      );
+    const form = new FormData();
+    form.append('source', Buffer.from(image), { filename: 'image.jpg' });
+    form.append('caption', content);
+    form.append('access_token', account.accessToken);
+    if (scheduledAt) {
+      form.append('published', 'false');
+      form.append('scheduled_publish_time', String(Math.floor(scheduledAt.getTime() / 1000)));
     }
+
+    const res = await this.request<{ post_id?: string; id: string }>({
+      method: 'POST',
+      url: `${GRAPH_BASE}/${account.platformUserId}/photos`,
+      data: form,
+      headers: form.getHeaders(),
+    });
+    return { platformPostId: res.post_id || res.id };
   }
 
   // Also used to cancel a not-yet-published, natively-scheduled Page post.
   async deletePost(account: SocialAccount, platformPostId: string): Promise<void> {
-    try {
-      await axios.delete(`https://graph.facebook.com/${GRAPH_VERSION}/${platformPostId}`, {
-        params: { access_token: account.accessToken },
-      });
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `Facebook delete failed: ${err.response?.data?.error?.message || err.message}`,
-      );
-    }
+    await this.request({
+      method: 'DELETE',
+      url: `${GRAPH_BASE}/${platformPostId}`,
+      params: { access_token: account.accessToken },
+    });
   }
 
   async editPost(account: SocialAccount, platformPostId: string, content: string): Promise<void> {
-    try {
-      await axios.post(`https://graph.facebook.com/${GRAPH_VERSION}/${platformPostId}`, null, {
-        params: { message: content, access_token: account.accessToken },
-      });
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `Facebook edit failed: ${err.response?.data?.error?.message || err.message}`,
-      );
-    }
+    await this.request({
+      method: 'POST',
+      url: `${GRAPH_BASE}/${platformPostId}`,
+      params: { message: content, access_token: account.accessToken },
+    });
   }
 
   async getMetrics(account: SocialAccount, platformPostId: string): Promise<PostMetrics> {
-    try {
-      const res = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/${platformPostId}`, {
-        params: {
-          fields: 'likes.summary(true),comments.summary(true),shares',
-          access_token: account.accessToken,
-        },
-      });
-      return {
-        likes: res.data.likes?.summary?.total_count,
-        comments: res.data.comments?.summary?.total_count,
-        shares: res.data.shares?.count,
-      };
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `Could not fetch Facebook metrics: ${err.response?.data?.error?.message || err.message}`,
-      );
-    }
+    const res = await this.request<{
+      likes?: { summary?: { total_count?: number } };
+      comments?: { summary?: { total_count?: number } };
+      shares?: { count?: number };
+    }>({
+      method: 'GET',
+      url: `${GRAPH_BASE}/${platformPostId}`,
+      params: {
+        fields: 'likes.summary(true),comments.summary(true),shares',
+        access_token: account.accessToken,
+      },
+    });
+
+    return {
+      likes: res.likes?.summary?.total_count,
+      comments: res.comments?.summary?.total_count,
+      shares: res.shares?.count,
+    };
   }
 }

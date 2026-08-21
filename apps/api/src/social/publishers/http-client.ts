@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import axios, { AxiosError, AxiosRequestConfig, AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosRequestConfig, AxiosInstance, AxiosResponse } from 'axios';
 
 /** How long any single provider call may take before it is abandoned. */
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -42,6 +42,20 @@ export class HttpClient {
   async request<T>(config: AxiosRequestConfig): Promise<T> {
     const res = await this.instance.request<T>(config);
     return res.data;
+  }
+
+  /**
+   * Performs a request and returns the whole response.
+   *
+   * Needed where a provider puts meaningful data in a header rather than the
+   * body — LinkedIn returns a created post's id in `x-restli-id`, not in the
+   * payload.
+   *
+   * @param config - Standard axios config.
+   * @returns The full axios response, headers included.
+   */
+  async requestRaw<T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.instance.request<T>(config);
   }
 }
 

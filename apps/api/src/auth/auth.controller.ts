@@ -6,6 +6,8 @@ import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/decorators/authenticated-user';
+import { errorMessage } from '../common/errors';
 
 @Controller('auth')
 export class AuthController {
@@ -23,7 +25,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  me(@CurrentUser() user: any) {
+  me(@CurrentUser() user: AuthenticatedUser) {
     return user;
   }
 
@@ -42,8 +44,8 @@ export class AuthController {
     try {
       const { accessToken, isNewUser } = await this.authService.handleGoogleOAuthCallback(code, state);
       return res.redirect(`${userAppUrl}/oauth/callback?token=${accessToken}${isNewUser ? '&isNewUser=1' : ''}`);
-    } catch (err: any) {
-      return res.redirect(`${userAppUrl}/oauth/callback?error=${encodeURIComponent(err.message || 'oauth_failed')}`);
+    } catch (err: unknown) {
+      return res.redirect(`${userAppUrl}/oauth/callback?error=${encodeURIComponent(errorMessage(err, 'oauth_failed'))}`);
     }
   }
 
@@ -67,8 +69,8 @@ export class AuthController {
     try {
       const { accessToken, isNewUser } = await this.authService.handleOAuthCallback(platform, code, state);
       return res.redirect(`${userAppUrl}/oauth/callback?token=${accessToken}${isNewUser ? '&isNewUser=1' : ''}`);
-    } catch (err: any) {
-      return res.redirect(`${userAppUrl}/oauth/callback?error=${encodeURIComponent(err.message || 'oauth_failed')}`);
+    } catch (err: unknown) {
+      return res.redirect(`${userAppUrl}/oauth/callback?error=${encodeURIComponent(errorMessage(err, 'oauth_failed'))}`);
     }
   }
 }

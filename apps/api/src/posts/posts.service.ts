@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Post, SocialAccount, SocialPlatform } from '@prisma/client';
+import { Post, Prisma, SocialAccount, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SocialService } from '../social/social.service';
 import { ALL_PLATFORM_IDS, isNativelySchedulable } from '@syncpost/platform-core';
@@ -8,6 +8,7 @@ import { PostMetrics } from '../social/publisher.interface';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
+import { errorMessage } from '../common/errors';
 
 @Injectable()
 export class PostsService {
@@ -157,7 +158,7 @@ export class PostsService {
         imageUrl: dto.imageUrl,
         destinationIds: dto.destinationIds,
         platforms,
-        platformContent: dto.platformContent as any,
+        platformContent: dto.platformContent as Prisma.InputJsonValue,
         status: scheduledAt ? 'SCHEDULED' : 'PUBLISHING',
         scheduledAt,
       },
@@ -181,7 +182,7 @@ export class PostsService {
         imageUrl: dto.imageUrl,
         destinationIds,
         platforms,
-        platformContent: dto.platformContent as any,
+        platformContent: dto.platformContent as Prisma.InputJsonValue,
         status: 'DRAFT',
       },
       include: { results: true },
@@ -209,7 +210,7 @@ export class PostsService {
         imageUrl: dto.imageUrl !== undefined ? dto.imageUrl : post.imageUrl,
         destinationIds: dto.destinationIds,
         platforms,
-        platformContent: (dto.platformContent ?? post.platformContent) as any,
+        platformContent: (dto.platformContent ?? post.platformContent) as Prisma.InputJsonValue,
         status: scheduledAt ? 'SCHEDULED' : 'PUBLISHING',
         scheduledAt,
       },
@@ -254,7 +255,7 @@ export class PostsService {
             },
             update: { status: 'PENDING', platformPostId: result.platformPostId, error: null },
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           await this.prisma.postPublishResult.upsert({
             where: { postId_socialAccountId: { postId: post.id, socialAccountId: account.id } },
             create: {
@@ -263,9 +264,9 @@ export class PostsService {
               platform: account.platform,
               destinationLabel: this.labelFor(account),
               status: 'FAILED',
-              error: err.message || 'Unknown error',
+              error: errorMessage(err, 'Unknown error'),
             },
-            update: { status: 'FAILED', error: err.message || 'Unknown error' },
+            update: { status: 'FAILED', error: errorMessage(err, 'Unknown error') },
           });
         }
       }),
@@ -294,7 +295,7 @@ export class PostsService {
           .filter((r) => r.status === 'PENDING' && r.platformPostId && r.socialAccountId)
           .map((r) =>
             this.socialService.deletePost(userId, r.socialAccountId as string, r.platformPostId as string).catch((err) => {
-              this.logger.warn(`Failed to cancel native schedule for post ${postId} on ${r.platform}: ${err.message}`);
+              this.logger.warn(`Failed to cancel native schedule for post ${postId} on ${r.platform}: ${errorMessage(err)}`);
             }),
           ),
       );
@@ -309,7 +310,7 @@ export class PostsService {
           .filter((r) => r.status === 'SUCCESS' && r.platformPostId && r.socialAccountId)
           .map((r) =>
             this.socialService.deletePost(userId, r.socialAccountId as string, r.platformPostId as string).catch((err) => {
-              warnings.push(`Could not delete on ${r.destinationLabel || r.platform}: ${err.message}`);
+              warnings.push(`Could not delete on ${r.destinationLabel || r.platform}: ${errorMessage(err)}`);
             }),
           ),
       );
@@ -341,12 +342,12 @@ export class PostsService {
           try {
             await this.socialService.editPost(userId, r.socialAccountId as string, r.platformPostId as string, content);
             return { platform: r.platform, destinationLabel: r.destinationLabel, ok: true as const };
-          } catch (err: any) {
+          } catch (err: unknown) {
             return {
               platform: r.platform,
               destinationLabel: r.destinationLabel,
               ok: false as const,
-              message: err.message || 'Unknown error',
+              message: errorMessage(err, 'Unknown error'),
             };
           }
         }),

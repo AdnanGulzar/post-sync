@@ -8,7 +8,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { SocialPlatform } from '@prisma/client';
+import { Prisma, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -147,7 +147,7 @@ export class AuthService {
           accessToken,
           refreshToken,
           tokenExpiresAt,
-          metadata: (metadata as any) ?? undefined,
+          metadata: (metadata as Prisma.InputJsonValue) ?? undefined,
         },
         update: {
           platformUserId,
@@ -155,7 +155,7 @@ export class AuthService {
           accessToken,
           refreshToken,
           tokenExpiresAt,
-          metadata: (metadata as any) ?? undefined,
+          metadata: (metadata as Prisma.InputJsonValue) ?? undefined,
         },
       });
     }

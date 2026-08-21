@@ -21,7 +21,7 @@ import {
 import { Button, cn } from '@syncpost/ui';
 import { ApiError } from '@syncpost/api-client';
 import { api } from '../lib/api';
-import { docToPlainText, firstImageSrc, countImages } from '../lib/serializeEditor';
+import { PMNode, countImages, docToPlainText, firstImageSrc } from '../lib/serializeEditor';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const EMOJIS = [
@@ -57,7 +57,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       attributes: { class: 'prose-editor min-h-40 focus:outline-none' },
     },
     onUpdate: ({ editor: e }) => {
-      const doc = e.getJSON() as any;
+      const doc = e.getJSON() as PMNode;
       onChange(docToPlainText(doc), firstImageSrc(doc), countImages(doc));
     },
   });
@@ -70,7 +70,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   // matching what onUpdate would report — the initial doc never triggers onUpdate itself.
   useEffect(() => {
     if (!editor) return;
-    const doc = editor.getJSON() as any;
+    const doc = editor.getJSON() as PMNode;
     onChange(docToPlainText(doc), firstImageSrc(doc), countImages(doc));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);

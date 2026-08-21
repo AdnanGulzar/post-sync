@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { DestinationType, SocialPlatform } from '@prisma/client';
+import { DestinationType, Prisma, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OAuthStateService } from './oauth-state.service';
 import { PublisherRegistry } from './publishers/publisher.registry';
@@ -83,7 +83,7 @@ export class SocialService {
             accessToken: result.accessToken,
             refreshToken: result.refreshToken,
             tokenExpiresAt: result.tokenExpiresAt,
-            metadata: (result.metadata as any) ?? undefined,
+            metadata: (result.metadata as Prisma.InputJsonValue) ?? undefined,
           },
           update: {
             destinationType: result.destinationType,
@@ -91,7 +91,7 @@ export class SocialService {
             accessToken: result.accessToken,
             refreshToken: result.refreshToken,
             tokenExpiresAt: result.tokenExpiresAt,
-            metadata: (result.metadata as any) ?? undefined,
+            metadata: (result.metadata as Prisma.InputJsonValue) ?? undefined,
           },
         }),
       ),
