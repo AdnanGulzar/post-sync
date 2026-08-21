@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -23,12 +23,12 @@ export class PlansController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePlanDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePlanDto) {
     return this.plansService.update(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.plansService.remove(id);
   }
 }

@@ -19,6 +19,8 @@ import { PlansService } from '../subscriptions/plans.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { StripeService } from './stripe.service';
+import { CheckoutSessionDto } from './dto/checkout-session.dto';
+import { ChangePlanDto } from './dto/change-plan.dto';
 
 @Controller('stripe')
 export class StripeController {
@@ -82,7 +84,8 @@ export class StripeController {
   // switch to a different paid plan (planId in the body, from the billing page).
   @UseGuards(JwtAuthGuard)
   @Post('checkout-session')
-  async createCheckoutSession(@CurrentUser() user: any, @Body('planId') planId?: string) {
+  async createCheckoutSession(@CurrentUser() user: any, @Body() dto: CheckoutSessionDto) {
+    const planId = dto.planId;
     const subscription = await this.prisma.subscription.findUnique({
       where: { userId: user.id },
       include: { plan: true },
@@ -123,8 +126,8 @@ export class StripeController {
   // subscription must be cancelled so they stop being billed for it.
   @UseGuards(JwtAuthGuard)
   @Patch('change-plan')
-  async changePlan(@CurrentUser() user: any, @Body('planId') planId: string) {
-    if (!planId) throw new BadRequestException('planId is required.');
+  async changePlan(@CurrentUser() user: any, @Body() dto: ChangePlanDto) {
+    const planId = dto.planId;
 
     const subscription = await this.prisma.subscription.findUnique({ where: { userId: user.id } });
     if (!subscription) throw new BadRequestException('No subscription found for this account.');

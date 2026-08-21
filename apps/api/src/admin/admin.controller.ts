@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -26,19 +26,19 @@ export class AdminController {
   @Patch('users/:id/subscription')
   grantSubscription(
     @CurrentUser() admin: any,
-    @Param('id') userId: string,
+    @Param('id', ParseUUIDPipe) userId: string,
     @Body() dto: GrantSubscriptionDto,
   ) {
     return this.adminService.grantSubscription(admin.id, userId, dto);
   }
 
   @Patch('users/:id/deactivate')
-  deactivateUser(@Param('id') userId: string) {
+  deactivateUser(@Param('id', ParseUUIDPipe) userId: string) {
     return this.adminService.deactivateUser(userId);
   }
 
   @Patch('users/:id/reactivate')
-  reactivateUser(@Param('id') userId: string) {
+  reactivateUser(@Param('id', ParseUUIDPipe) userId: string) {
     return this.adminService.reactivateUser(userId);
   }
 }
