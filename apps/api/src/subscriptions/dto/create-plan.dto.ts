@@ -4,7 +4,7 @@ import { SocialPlatform } from '@prisma/client';
 export class CreatePlanDto {
   @IsString()
   @MinLength(2)
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsInt()

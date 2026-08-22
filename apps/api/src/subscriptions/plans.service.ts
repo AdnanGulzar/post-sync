@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
+import { ALL_PLATFORM_IDS } from '@syncpost/platform-core';
 
 @Injectable()
 export class PlansService {
@@ -42,7 +43,8 @@ export class PlansService {
         postsLimit: dto.postsLimit,
         connectedAccountsLimit: dto.connectedAccountsLimit,
         stripePriceId: dto.stripePriceId,
-        platforms: dto.platforms ?? ['LINKEDIN', 'FACEBOOK', 'X'],
+        // A plan with no explicit platform list grants all of them.
+        platforms: dto.platforms ?? [...ALL_PLATFORM_IDS],
         isCustom: true,
       },
     });

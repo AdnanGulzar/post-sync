@@ -1,5 +1,6 @@
 import { Globe2, Heart, MessageCircle, Repeat2, Send, Share2, ThumbsUp } from 'lucide-react';
 import { SocialPlatform } from '@syncpost/api-client';
+import { PLATFORMS } from '@syncpost/platform-core';
 import { cn } from '@syncpost/ui';
 
 interface PlatformPreviewProps {
@@ -10,14 +11,8 @@ interface PlatformPreviewProps {
   imageUrl?: string;
 }
 
-const CHAR_LIMITS: Record<SocialPlatform, number | null> = {
-  X: 280,
-  LINKEDIN: 3000,
-  FACEBOOK: null,
-};
-
 export function CharacterCount({ platform, content }: { platform: SocialPlatform; content: string }) {
-  const limit = CHAR_LIMITS[platform];
+  const limit = PLATFORMS[platform].charLimit;
   const count = content.length;
   const overLimit = limit !== null && count > limit;
   return (

@@ -1,12 +1,14 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
-import { Post, SocialAccount, SocialPlatform } from '@prisma/client';
+import { Post, Prisma, SocialAccount, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SocialService, isNativelySchedulable } from '../social/social.service';
+import { SocialService } from '../social/social.service';
+import { decideRetry } from '../publishing/retry-policy';
+import { ALL_PLATFORM_IDS, isNativelySchedulable } from '@syncpost/platform-core';
 import { PostMetrics } from '../social/publisher.interface';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { PublishDraftDto } from './dto/publish-draft.dto';
+import { errorMessage } from '../common/errors';
 
 @Injectable()
 export class PostsService {
@@ -87,7 +89,7 @@ export class PostsService {
     );
     const metricsByResultId = new Map(withMetrics.map((r) => [r.id, r.metrics]));
 
-    const platforms: SocialPlatform[] = ['LINKEDIN', 'FACEBOOK', 'X'];
+    const platforms: readonly SocialPlatform[] = ALL_PLATFORM_IDS;
     const platformStats = platforms.map((platform) => {
       const entries = allResults.filter(({ result }) => result.platform === platform);
       const success = entries.filter(({ result }) => result.status === 'SUCCESS').length;
@@ -156,7 +158,7 @@ export class PostsService {
         imageUrl: dto.imageUrl,
         destinationIds: dto.destinationIds,
         platforms,
-        platformContent: dto.platformContent as any,
+        platformContent: dto.platformContent as Prisma.InputJsonValue,
         status: scheduledAt ? 'SCHEDULED' : 'PUBLISHING',
         scheduledAt,
       },
@@ -180,7 +182,7 @@ export class PostsService {
         imageUrl: dto.imageUrl,
         destinationIds,
         platforms,
-        platformContent: dto.platformContent as any,
+        platformContent: dto.platformContent as Prisma.InputJsonValue,
         status: 'DRAFT',
       },
       include: { results: true },
@@ -208,7 +210,7 @@ export class PostsService {
         imageUrl: dto.imageUrl !== undefined ? dto.imageUrl : post.imageUrl,
         destinationIds: dto.destinationIds,
         platforms,
-        platformContent: (dto.platformContent ?? post.platformContent) as any,
+        platformContent: (dto.platformContent ?? post.platformContent) as Prisma.InputJsonValue,
         status: scheduledAt ? 'SCHEDULED' : 'PUBLISHING',
         scheduledAt,
       },
@@ -253,7 +255,7 @@ export class PostsService {
             },
             update: { status: 'PENDING', platformPostId: result.platformPostId, error: null },
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           await this.prisma.postPublishResult.upsert({
             where: { postId_socialAccountId: { postId: post.id, socialAccountId: account.id } },
             create: {
@@ -262,9 +264,9 @@ export class PostsService {
               platform: account.platform,
               destinationLabel: this.labelFor(account),
               status: 'FAILED',
-              error: err.message || 'Unknown error',
+              error: errorMessage(err, 'Unknown error'),
             },
-            update: { status: 'FAILED', error: err.message || 'Unknown error' },
+            update: { status: 'FAILED', error: errorMessage(err, 'Unknown error') },
           });
         }
       }),
@@ -293,7 +295,7 @@ export class PostsService {
           .filter((r) => r.status === 'PENDING' && r.platformPostId && r.socialAccountId)
           .map((r) =>
             this.socialService.deletePost(userId, r.socialAccountId as string, r.platformPostId as string).catch((err) => {
-              this.logger.warn(`Failed to cancel native schedule for post ${postId} on ${r.platform}: ${err.message}`);
+              this.logger.warn(`Failed to cancel native schedule for post ${postId} on ${r.platform}: ${errorMessage(err)}`);
             }),
           ),
       );
@@ -308,7 +310,7 @@ export class PostsService {
           .filter((r) => r.status === 'SUCCESS' && r.platformPostId && r.socialAccountId)
           .map((r) =>
             this.socialService.deletePost(userId, r.socialAccountId as string, r.platformPostId as string).catch((err) => {
-              warnings.push(`Could not delete on ${r.destinationLabel || r.platform}: ${err.message}`);
+              warnings.push(`Could not delete on ${r.destinationLabel || r.platform}: ${errorMessage(err)}`);
             }),
           ),
       );
@@ -340,12 +342,12 @@ export class PostsService {
           try {
             await this.socialService.editPost(userId, r.socialAccountId as string, r.platformPostId as string, content);
             return { platform: r.platform, destinationLabel: r.destinationLabel, ok: true as const };
-          } catch (err: any) {
+          } catch (err: unknown) {
             return {
               platform: r.platform,
               destinationLabel: r.destinationLabel,
               ok: false as const,
-              message: err.message || 'Unknown error',
+              message: errorMessage(err, 'Unknown error'),
             };
           }
         }),
@@ -379,58 +381,121 @@ export class PostsService {
   // what actually publishes a due post; natively-scheduled destinations (Facebook
   // Pages) were already handed off to the provider at creation time, so we just
   // trust their result here (unless that attempt itself already failed).
-  @Cron(CronExpression.EVERY_MINUTE)
-  async processDueScheduledPosts() {
-    const duePosts = await this.prisma.post.findMany({
-      where: { status: 'SCHEDULED', scheduledAt: { lte: new Date() } },
+  /**
+   * Publishes a post the worker has already claimed.
+   *
+   * Assumes the caller moved the post to PUBLISHING atomically; this does not
+   * claim it again. Safe to re-run: destinations that already succeeded are
+   * skipped, which is what makes the stale-claim reaper safe.
+   *
+   * @param postId - A post currently in PUBLISHING.
+   */
+  async publishClaimedPost(postId: string): Promise<void> {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
       include: { results: true },
     });
+    if (!post) return;
 
-    for (const post of duePosts) {
-      const claimed = await this.prisma.post.updateMany({
-        where: { id: post.id, status: 'SCHEDULED' },
-        data: { status: 'PUBLISHING' },
+    const resultByDestination = new Map(
+      post.results.filter((r) => r.socialAccountId).map((r) => [r.socialAccountId as string, r]),
+    );
+
+    // A result already exists for anything handed off natively at creation time.
+    // PENDING means the provider accepted the schedule, so confirm it published.
+    const pendingNativeIds = post.destinationIds.filter(
+      (id) => resultByDestination.get(id)?.status === 'PENDING',
+    );
+    // No result yet, or a retryable failure: publish it now.
+    const selfManagedIds = post.destinationIds.filter((id) => {
+      const existing = resultByDestination.get(id);
+      return !existing || existing.status === 'RETRYING';
+    });
+
+    await Promise.all(
+      pendingNativeIds.map((socialAccountId) =>
+        this.prisma.postPublishResult.update({
+          where: { postId_socialAccountId: { postId: post.id, socialAccountId } },
+          data: { status: 'SUCCESS', publishedAt: new Date() },
+        }),
+      ),
+    );
+
+    if (selfManagedIds.length > 0) {
+      const accounts = await this.prisma.socialAccount.findMany({
+        where: { id: { in: selfManagedIds } },
       });
-      if (claimed.count === 0) continue; // already picked up elsewhere
-
-      try {
-        const resultByDestination = new Map(post.results.filter((r) => r.socialAccountId).map((r) => [r.socialAccountId as string, r]));
-
-        // A result already exists for anything handed off natively at creation time
-        // (PENDING = succeeded, just flip to SUCCESS; FAILED = don't retry). Anything
-        // with no result yet is self-managed and needs publishing right now.
-        const pendingNativeIds = post.destinationIds.filter((id) => resultByDestination.get(id)?.status === 'PENDING');
-        const selfManagedIds = post.destinationIds.filter((id) => !resultByDestination.has(id));
-
-        await Promise.all(
-          pendingNativeIds.map((socialAccountId) =>
-            this.prisma.postPublishResult.update({
-              where: { postId_socialAccountId: { postId: post.id, socialAccountId } },
-              data: { status: 'SUCCESS', publishedAt: new Date() },
-            }),
-          ),
-        );
-
-        if (selfManagedIds.length > 0) {
-          const accounts = await this.prisma.socialAccount.findMany({ where: { id: { in: selfManagedIds } } });
-          await this.publishToDestinations({ ...post, status: 'PUBLISHING' }, accounts);
-        }
-
-        await this.finalizeStatus(post.id);
-      } catch (err) {
-        this.logger.error(`Failed to publish scheduled post ${post.id}`, err as Error);
-      }
+      await this.publishToDestinations({ ...post, status: 'PUBLISHING' }, accounts);
     }
+
+    await this.finalizeStatus(post.id);
+  }
+
+  /**
+   * Re-attempts every destination of a post whose backoff has elapsed.
+   *
+   * @param postId - The post to sweep.
+   */
+  async retryFailedDestinations(postId: string): Promise<void> {
+    const now = new Date();
+    const due = await this.prisma.postPublishResult.findMany({
+      where: { postId, status: 'RETRYING', nextRetryAt: { lte: now } },
+    });
+    if (due.length === 0) return;
+
+    const accountIds = due.map((r) => r.socialAccountId).filter((id): id is string => id !== null);
+    if (accountIds.length === 0) return;
+
+    const post = await this.prisma.post.findUnique({ where: { id: postId } });
+    if (!post) return;
+
+    const accounts = await this.prisma.socialAccount.findMany({ where: { id: { in: accountIds } } });
+    await this.publishToDestinations(post, accounts);
+    await this.finalizeStatus(postId);
   }
 
   // Publishes to the given destinations and upserts their PostPublishResult rows.
   // Does NOT touch Post.status — call finalizeStatus afterwards for that.
+  /**
+   * Publishes to several destinations concurrently and records each outcome.
+   *
+   * Idempotent by design: any destination that already holds a SUCCESS result is
+   * skipped. That is what makes re-running safe after the reaper returns an
+   * abandoned post to the queue — without it, recovery would double-post to
+   * every destination that had already succeeded.
+   *
+   * @param post - The post being published.
+   * @param destinations - Accounts to publish to. Already-successful ones are filtered out here.
+   */
   private async publishToDestinations(post: Post, destinations: SocialAccount[]) {
     if (destinations.length === 0) return;
-    const platformContent = (post.platformContent as Partial<Record<SocialPlatform, string>> | null) ?? {};
+
+    const alreadyPublished = await this.prisma.postPublishResult.findMany({
+      where: {
+        postId: post.id,
+        socialAccountId: { in: destinations.map((d) => d.id) },
+        status: 'SUCCESS',
+      },
+      select: { socialAccountId: true },
+    });
+    const done = new Set(alreadyPublished.map((r) => r.socialAccountId));
+    const pending = destinations.filter((d) => !done.has(d.id));
+    if (pending.length === 0) return;
+
+    const attemptsByAccount = new Map(
+      (
+        await this.prisma.postPublishResult.findMany({
+          where: { postId: post.id, socialAccountId: { in: pending.map((d) => d.id) } },
+          select: { socialAccountId: true, attemptCount: true },
+        })
+      ).map((r) => [r.socialAccountId as string, r.attemptCount]),
+    );
+
+    const platformContent =
+      (post.platformContent as Partial<Record<SocialPlatform, string>> | null) ?? {};
 
     const outcomes = await Promise.allSettled(
-      destinations.map((account) =>
+      pending.map((account) =>
         this.socialService.publish(
           post.userId,
           account.id,
@@ -442,41 +507,51 @@ export class PostsService {
 
     await Promise.all(
       outcomes.map((outcome, i) => {
-        const account = destinations[i];
+        // Promise.allSettled preserves input order, so this index is always
+        // populated; the guard satisfies noUncheckedIndexedAccess.
+        const account = pending[i];
+        if (!account) return Promise.resolve(null);
+
+        const base = {
+          postId: post.id,
+          socialAccountId: account.id,
+          platform: account.platform,
+          destinationLabel: this.labelFor(account),
+        };
+
         if (outcome.status === 'fulfilled') {
+          const success = {
+            status: 'SUCCESS' as const,
+            platformPostId: outcome.value.platformPostId,
+            publishedAt: new Date(),
+            error: null,
+            nextRetryAt: null,
+          };
           return this.prisma.postPublishResult.upsert({
             where: { postId_socialAccountId: { postId: post.id, socialAccountId: account.id } },
-            create: {
-              postId: post.id,
-              socialAccountId: account.id,
-              platform: account.platform,
-              destinationLabel: this.labelFor(account),
-              status: 'SUCCESS',
-              platformPostId: outcome.value.platformPostId,
-              publishedAt: new Date(),
-            },
-            update: {
-              status: 'SUCCESS',
-              platformPostId: outcome.value.platformPostId,
-              publishedAt: new Date(),
-              error: null,
-            },
+            create: { ...base, ...success, attemptCount: (attemptsByAccount.get(account.id) ?? 0) + 1 },
+            update: { ...success, attemptCount: { increment: 1 } },
           });
         }
+
+        const attemptCount = (attemptsByAccount.get(account.id) ?? 0) + 1;
+        const decision = decideRetry(outcome.reason, attemptCount);
+        const failure = {
+          status: decision.shouldRetry ? ('RETRYING' as const) : ('FAILED' as const),
+          error: errorMessage(outcome.reason),
+          nextRetryAt: decision.nextRetryAt,
+        };
+
+        if (!decision.shouldRetry) {
+          this.logger.warn(
+            `Giving up on ${account.platform} for post ${post.id} after ${attemptCount} attempt(s): ${failure.error}`,
+          );
+        }
+
         return this.prisma.postPublishResult.upsert({
           where: { postId_socialAccountId: { postId: post.id, socialAccountId: account.id } },
-          create: {
-            postId: post.id,
-            socialAccountId: account.id,
-            platform: account.platform,
-            destinationLabel: this.labelFor(account),
-            status: 'FAILED',
-            error: outcome.reason?.message || 'Unknown error',
-          },
-          update: {
-            status: 'FAILED',
-            error: outcome.reason?.message || 'Unknown error',
-          },
+          create: { ...base, ...failure, attemptCount },
+          update: { ...failure, attemptCount },
         });
       }),
     );
@@ -484,11 +559,46 @@ export class PostsService {
 
   // Derives Post.status from the complete, current set of PostPublishResult rows —
   // safer than tracking outcomes through partial (native vs self-managed) publish calls.
+  /**
+   * Recomputes a post's status from its destination results.
+   *
+   * Derived rather than tracked through the publish calls, so a recovered or
+   * retried post always converges on the truth.
+   *
+   * @param postId - The post to recompute.
+   * @returns The updated post with its results.
+   */
   private async finalizeStatus(postId: string) {
     const results = await this.prisma.postPublishResult.findMany({ where: { postId } });
-    const allSucceeded = results.length > 0 && results.every((r) => r.status === 'SUCCESS');
-    const allFailed = results.length === 0 || results.every((r) => r.status === 'FAILED');
-    const finalStatus = allSucceeded ? 'PUBLISHED' : allFailed ? 'FAILED' : 'PARTIAL';
+
+    // No results at all means nothing was ever attempted — treat as failed
+    // rather than published, but do not claim it succeeded.
+    if (results.length === 0) {
+      return this.prisma.post.update({
+        where: { id: postId },
+        data: { status: 'FAILED' },
+        include: { results: true },
+      });
+    }
+
+    const anySucceeded = results.some((r) => r.status === 'SUCCESS');
+    const anyRetrying = results.some((r) => r.status === 'RETRYING');
+    const allPending = results.every((r) => r.status === 'PENDING');
+
+    // Everything handed to a provider's own scheduler and not yet due: the post
+    // is still scheduled, and publishDuePosts will confirm it when its time comes.
+    // Deliberately NOT used when retries are queued — a SCHEDULED post whose
+    // scheduledAt has passed would be re-claimed on the very next tick, which
+    // would publish immediately and ignore the backoff entirely.
+    const finalStatus = allPending
+      ? 'SCHEDULED'
+      : anyRetrying
+        ? 'PARTIAL'
+        : results.every((r) => r.status === 'SUCCESS')
+          ? 'PUBLISHED'
+          : anySucceeded
+            ? 'PARTIAL'
+            : 'FAILED';
 
     return this.prisma.post.update({
       where: { id: postId },

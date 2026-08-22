@@ -9,7 +9,19 @@ import { toBold, toBoldItalic, toItalic, toStrikethrough, toUnderline } from './
  */
 
 type PMMark = { type: string; attrs?: Record<string, unknown> };
-type PMNode = { type: string; text?: string; marks?: PMMark[]; attrs?: Record<string, unknown>; content?: PMNode[] };
+/**
+ * A ProseMirror/TipTap document node, as returned by `editor.getJSON()`.
+ *
+ * `type` is optional to match TipTap's own `JSONContent`, so callers can pass
+ * `getJSON()` straight in rather than casting through `any`.
+ */
+export type PMNode = {
+  type?: string;
+  text?: string;
+  marks?: PMMark[];
+  attrs?: Record<string, unknown>;
+  content?: PMNode[];
+};
 
 function styleText(text: string, marks: PMMark[] = []): string {
   const has = (t: string) => marks.some((m) => m.type === t);

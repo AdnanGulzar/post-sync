@@ -5,6 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { PlansService } from '../subscriptions/plans.service';
 import { CreatePlanDto } from '../subscriptions/dto/create-plan.dto';
 import { UpdatePlanDto } from '../subscriptions/dto/update-plan.dto';
+import { ParseEntityIdPipe } from '../common/pipes/parse-entity-id.pipe';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN')
@@ -23,12 +24,12 @@ export class PlansController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdatePlanDto) {
+  update(@Param('id', ParseEntityIdPipe) id: string, @Body() dto: UpdatePlanDto) {
     return this.plansService.update(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseEntityIdPipe) id: string) {
     return this.plansService.remove(id);
   }
 }

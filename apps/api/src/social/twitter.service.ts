@@ -1,135 +1,197 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
-import axios from 'axios';
-import { randomBytes, createHash } from 'crypto';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { SocialAccount } from '@prisma/client';
-import { SocialPlatformService, PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+import { PLATFORMS } from '@syncpost/platform-core';
+import { PublishResult, ConnectedDestination, PostMetrics } from './publisher.interface';
+import { BasePublisher } from './publishers/base-publisher';
+import { HttpClient } from './publishers/http-client';
+import { codeChallengeFor } from './publishers/pkce';
+import type { PlatformPublisher } from './publishers/publisher.registry';
+import type {
+  RefreshableTokenSource,
+  RefreshedTokens,
+  StoredCredentials,
+} from './tokens/refreshable';
+import { PermanentError } from './publishers/publisher.errors';
 
-/**
- * X (Twitter) API v2 posting, OAuth 2.0 with PKCE (user context).
- * Requires an app at https://developer.x.com/en/portal/dashboard with
- * OAuth 2.0 enabled and "tweet.read tweet.write users.read offline.access" scopes.
- */
+const AUTHORIZE_URL = 'https://twitter.com/i/oauth2/authorize';
+const TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
+const API_BASE = 'https://api.twitter.com/2';
+
+/** Scopes required to post, read back metrics, and refresh without re-consent. */
+const SCOPES = 'tweet.read tweet.write users.read offline.access';
+
+/** Shape of the token endpoint's response, narrowed to what is used. */
+interface TokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
 @Injectable()
-export class TwitterService implements SocialPlatformService {
-  private clientId = process.env.X_CLIENT_ID || '';
-  private clientSecret = process.env.X_CLIENT_SECRET || '';
-  private redirectUri = process.env.X_REDIRECT_URI || '';
+export class TwitterService
+  extends BasePublisher
+  implements PlatformPublisher, RefreshableTokenSource
+{
+  readonly descriptor = PLATFORMS.X;
 
-  static generateCodeVerifier(): string {
-    return randomBytes(32).toString('base64url');
+  private readonly clientId = process.env.X_CLIENT_ID || '';
+  private readonly clientSecret = process.env.X_CLIENT_SECRET || '';
+  private readonly redirectUri = process.env.X_REDIRECT_URI || '';
+
+  constructor(http: HttpClient) {
+    super(http);
   }
 
-  private static codeChallengeFor(verifier: string): string {
-    return createHash('sha256').update(verifier).digest('base64url');
+  /** X nests the reason under `detail`. */
+  protected errorDetail(body: unknown): string | undefined {
+    return (body as { detail?: string } | undefined)?.detail;
   }
 
   getAuthUrl(state: string, codeVerifier?: string): string {
-    const challenge = TwitterService.codeChallengeFor(codeVerifier || '');
-    const params = new URLSearchParams({
+    return this.authUrl(AUTHORIZE_URL, {
       response_type: 'code',
       client_id: this.clientId,
       redirect_uri: this.redirectUri,
-      scope: 'tweet.read tweet.write users.read offline.access',
+      scope: SCOPES,
       state,
-      code_challenge: challenge,
+      code_challenge: codeChallengeFor(codeVerifier || ''),
       code_challenge_method: 'S256',
     });
-    return `https://twitter.com/i/oauth2/authorize?${params.toString()}`;
   }
 
   async handleCallback(code: string, codeVerifier?: string): Promise<ConnectedDestination[]> {
     const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
 
-    const tokenRes = await axios.post(
-      'https://api.twitter.com/2/oauth2/token',
-      new URLSearchParams({
+    const token = await this.request<TokenResponse>({
+      method: 'POST',
+      url: TOKEN_URL,
+      data: new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         redirect_uri: this.redirectUri,
         code_verifier: codeVerifier || '',
         client_id: this.clientId,
       }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Basic ${basicAuth}`,
-        },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basicAuth}`,
       },
-    );
+    });
 
-    const accessToken = tokenRes.data.access_token;
-    const refreshToken = tokenRes.data.refresh_token;
-    const expiresIn = tokenRes.data.expires_in as number | undefined;
-
-    const meRes = await axios.get('https://api.twitter.com/2/users/me', {
-      headers: { Authorization: `Bearer ${accessToken}` },
+    const me = await this.request<{ data: { id: string; username: string } }>({
+      method: 'GET',
+      url: `${API_BASE}/users/me`,
+      headers: { Authorization: `Bearer ${token.access_token}` },
     });
 
     return [
       {
-        platformUserId: meRes.data.data.id,
-        platformUsername: meRes.data.data.username,
+        platformUserId: me.data.id,
+        platformUsername: me.data.username,
         destinationType: 'PERSONAL',
-        accessToken,
-        refreshToken,
-        tokenExpiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : undefined,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token,
+        tokenExpiresAt: this.expiresAt(token.expires_in),
       },
     ];
   }
 
-  async publish(account: SocialAccount, content: string): Promise<PublishResult> {
-    try {
-      const res = await axios.post(
-        'https://api.twitter.com/2/tweets',
-        { text: content },
-        { headers: { Authorization: `Bearer ${account.accessToken}`, 'Content-Type': 'application/json' } },
-      );
-      return { platformPostId: res.data.data.id };
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `X (Twitter) publish failed: ${err.response?.data?.detail || err.message}`,
-      );
+  /**
+   * Exchanges a refresh token for a new access token.
+   *
+   * X access tokens last roughly two hours, so this is the difference between
+   * publishing working and the user reconnecting several times a day. X rotates
+   * the refresh token on every use, so the returned one must be persisted or the
+   * next refresh fails.
+   *
+   * @param current - The account's stored credentials; X uses `refreshToken`.
+   * @returns New credentials, including the rotated refresh token.
+   * @throws {TokenExpiredError} If X rejects the refresh token.
+   */
+  async refreshTokens(current: StoredCredentials): Promise<RefreshedTokens> {
+    if (!current.refreshToken) {
+      throw new PermanentError(this.descriptor.label, 'no refresh token stored for this account');
     }
+    const basicAuth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+    const token = await this.request<TokenResponse>({
+      method: 'POST',
+      url: TOKEN_URL,
+      data: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: current.refreshToken,
+        client_id: this.clientId,
+      }),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basicAuth}`,
+      },
+    });
+
+    return {
+      accessToken: token.access_token,
+      refreshToken: token.refresh_token,
+      expiresAt: this.expiresAt(token.expires_in),
+    };
+  }
+
+  async publish(account: SocialAccount, content: string): Promise<PublishResult> {
+    const res = await this.request<{ data: { id: string } }>({
+      method: 'POST',
+      url: `${API_BASE}/tweets`,
+      data: { text: content },
+      headers: {
+        Authorization: `Bearer ${account.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return { platformPostId: res.data.id };
   }
 
   async deletePost(account: SocialAccount, platformPostId: string): Promise<void> {
-    try {
-      await axios.delete(`https://api.twitter.com/2/tweets/${platformPostId}`, {
-        headers: { Authorization: `Bearer ${account.accessToken}` },
-      });
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `X (Twitter) delete failed: ${err.response?.data?.detail || err.message}`,
-      );
-    }
+    await this.request({
+      method: 'DELETE',
+      url: `${API_BASE}/tweets/${platformPostId}`,
+      headers: { Authorization: `Bearer ${account.accessToken}` },
+    });
   }
 
-  // X's public API has no endpoint to edit a tweet's text after publish.
+  /**
+   * Not supported by X's API.
+   *
+   * @throws {BadRequestException} Always. Callers should check
+   *         `descriptor.capabilities.edit` first rather than relying on this.
+   */
   async editPost(): Promise<void> {
     throw new BadRequestException(
       "X doesn't support editing a published post through its API — delete it and post again instead.",
     );
   }
 
-  // impression_count is only populated for tweets the requesting user authored, which
-  // is always true here since we only ever fetch metrics for posts SyncPost published.
+  // impression_count is only populated for tweets the requesting user authored,
+  // which is always the case here since we published them.
   async getMetrics(account: SocialAccount, platformPostId: string): Promise<PostMetrics> {
-    try {
-      const res = await axios.get(`https://api.twitter.com/2/tweets/${platformPostId}`, {
-        params: { 'tweet.fields': 'public_metrics' },
-        headers: { Authorization: `Bearer ${account.accessToken}` },
-      });
-      const m = res.data.data?.public_metrics ?? {};
-      return {
-        likes: m.like_count,
-        comments: m.reply_count,
-        shares: m.retweet_count,
-        impressions: m.impression_count,
+    const res = await this.request<{
+      data?: {
+        public_metrics?: {
+          like_count?: number;
+          reply_count?: number;
+          retweet_count?: number;
+          impression_count?: number;
+        };
       };
-    } catch (err: any) {
-      throw new InternalServerErrorException(
-        `Could not fetch X metrics: ${err.response?.data?.detail || err.message}`,
-      );
-    }
+    }>({
+      method: 'GET',
+      url: `${API_BASE}/tweets/${platformPostId}`,
+      params: { 'tweet.fields': 'public_metrics' },
+      headers: { Authorization: `Bearer ${account.accessToken}` },
+    });
+
+    const m = res.data?.public_metrics ?? {};
+    return {
+      likes: m.like_count,
+      comments: m.reply_count,
+      shares: m.retweet_count,
+      impressions: m.impression_count,
+    };
   }
 }

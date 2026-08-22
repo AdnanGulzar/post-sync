@@ -1,21 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AdminPostAnalytics, SocialPlatform } from '@syncpost/api-client';
+import { AdminPostAnalytics } from '@syncpost/api-client';
+import { PLATFORMS } from '@syncpost/platform-core';
 import { Card, CardContent, CardHeader, CardTitle, HorizontalBarChart, Skeleton, cn } from '@syncpost/ui';
 import { api } from '../lib/api';
-
-const PLATFORM_LABELS: Record<SocialPlatform, string> = {
-  LINKEDIN: 'LinkedIn',
-  FACEBOOK: 'Facebook',
-  X: 'X (Twitter)',
-};
-
-// Same fixed categorical identity used on the user-facing Analytics page, so a
-// platform's accent color means the same thing everywhere in the product.
-const PLATFORM_COLOR: Record<SocialPlatform, string> = {
-  LINKEDIN: 'bg-chart-1',
-  FACEBOOK: 'bg-chart-2',
-  X: 'bg-chart-3',
-};
 
 function StatTile({
   label,
@@ -151,8 +138,8 @@ export default function PostAnalytics() {
               {platforms.map((stats) => (
                 <div key={stats.platform}>
                   <p className="mb-2 flex items-center gap-2 text-sm font-medium">
-                    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', PLATFORM_COLOR[stats.platform])} />
-                    {PLATFORM_LABELS[stats.platform]}
+                    <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', PLATFORMS[stats.platform].colorToken)} />
+                    {PLATFORMS[stats.platform].label}
                   </p>
                   <HorizontalBarChart
                     data={[

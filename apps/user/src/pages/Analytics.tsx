@@ -1,22 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PlatformAnalytics, PostAnalytics, SocialPlatform } from '@syncpost/api-client';
+import { PlatformAnalytics, PostAnalytics } from '@syncpost/api-client';
+import { PLATFORMS } from '@syncpost/platform-core';
 import { Button, Card, CardContent, CardHeader, CardTitle, HorizontalBarChart, Skeleton, cn } from '@syncpost/ui';
 import { api } from '../lib/api';
 
-const PLATFORM_LABELS: Record<SocialPlatform, string> = {
-  LINKEDIN: 'LinkedIn',
-  FACEBOOK: 'Facebook',
-  X: 'X (Twitter)',
-};
-
-// Fixed categorical identity per platform — consistent everywhere a platform's
-// own color shows up (its engagement bars, its accent dot).
-const PLATFORM_COLOR: Record<SocialPlatform, string> = {
-  LINKEDIN: 'bg-chart-1',
-  FACEBOOK: 'bg-chart-2',
-  X: 'bg-chart-3',
-};
 
 type DateRange = { from: Date | null; to: Date | null };
 type PresetKey = 'today' | '7d' | '30d' | 'all' | 'custom';
@@ -58,8 +46,18 @@ function toDateInputValue(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function fromDateInputValue(v: string): Date {
+/**
+ * Parses a native `<input type="date">` value ("YYYY-MM-DD") as a local-time Date.
+ *
+ * @param v - The raw input value. May be partial or malformed while the user types.
+ * @returns The parsed date, or `null` when the value isn't a complete date — the
+ *          range state already treats `null` as "no bound", so a half-typed date
+ *          no longer produces an Invalid Date that silently breaks the query.
+ */
+function fromDateInputValue(v: string): Date | null {
   const [y, m, d] = v.split('-').map(Number);
+  if (y === undefined || m === undefined || d === undefined) return null;
+  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return null;
   return new Date(y, m - 1, d);
 }
 
@@ -133,8 +131,8 @@ function PlatformSection({ stats, max }: { stats: PlatformAnalytics; max: number
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', PLATFORM_COLOR[stats.platform])} />
-          {PLATFORM_LABELS[stats.platform]}
+          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', PLATFORMS[stats.platform].colorToken)} />
+          {PLATFORMS[stats.platform].label}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -146,7 +144,7 @@ function PlatformSection({ stats, max }: { stats: PlatformAnalytics; max: number
         <div>
           <p className="mb-2 text-xs font-medium text-muted-foreground">Engagement</p>
           {hasEngagement ? (
-            <HorizontalBarChart data={engagementData} barClassName={PLATFORM_COLOR[stats.platform]} labelWidthClassName="w-20" />
+            <HorizontalBarChart data={engagementData} barClassName={PLATFORMS[stats.platform].colorToken} labelWidthClassName="w-20" />
           ) : (
             <p className="text-sm text-muted-foreground">No engagement data yet.</p>
           )}

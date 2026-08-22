@@ -3,10 +3,10 @@ import { SubscriptionStatus } from '@prisma/client';
 
 export class GrantSubscriptionDto {
   @IsString()
-  planId: string;
+  planId!: string;
 
   @IsEnum(SubscriptionStatus)
-  status: SubscriptionStatus;
+  status!: SubscriptionStatus;
 
   @IsOptional()
   @IsISO8601()

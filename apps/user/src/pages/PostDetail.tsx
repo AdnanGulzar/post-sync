@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, Post } from '@syncpost/api-client';
+import { PLATFORMS } from '@syncpost/platform-core';
 import { Badge, Card, CardContent, CardHeader, CardTitle, Skeleton } from '@syncpost/ui';
 import { api } from '../lib/api';
 
@@ -15,14 +16,6 @@ const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'warning' | 'in
 };
 
 // Best-effort public permalink so "View on <platform>" has somewhere useful to go.
-// Not guaranteed for every destination type (e.g. LinkedIn Company Pages), but
-// works for the common personal-profile / Page / tweet cases.
-function permalinkFor(platform: string, platformPostId: string): string | null {
-  if (platform === 'X') return `https://twitter.com/i/web/status/${platformPostId}`;
-  if (platform === 'FACEBOOK') return `https://www.facebook.com/${platformPostId}`;
-  if (platform === 'LINKEDIN') return `https://www.linkedin.com/feed/update/${platformPostId}/`;
-  return null;
-}
 
 export default function PostDetail() {
   const { id } = useParams<{ id: string }>();
@@ -98,7 +91,7 @@ export default function PostDetail() {
           ) : (
             <ul className="divide-y">
               {post.results.map((r) => {
-                const permalink = r.platformPostId ? permalinkFor(r.platform, r.platformPostId) : null;
+                const permalink = r.platformPostId ? PLATFORMS[r.platform].permalink(r.platformPostId) : null;
                 return (
                   <li key={r.id} className="space-y-1.5 py-3 first:pt-0 last:pb-0">
                     <div className="flex flex-wrap items-center gap-2">

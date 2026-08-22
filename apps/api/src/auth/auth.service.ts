@@ -8,7 +8,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-import { SocialPlatform } from '@prisma/client';
+import { Prisma, SocialPlatform } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
@@ -19,6 +19,7 @@ import { GoogleIdentityService } from './oauth/google-identity.service';
 import { OAuthSignupStateService } from './oauth/oauth-signup-state.service';
 import { PlansService } from '../subscriptions/plans.service';
 import { StripeService } from '../stripe/stripe.service';
+import { TokenVault } from '../social/tokens/token-vault';
 
 interface OAuthIdentity {
   platformUserId: string;
@@ -48,6 +49,7 @@ export class AuthService {
     private googleIdentity: GoogleIdentityService,
     private plansService: PlansService,
     private stripeService: StripeService,
+    private vault: TokenVault,
   ) {}
 
   async signup(dto: SignupDto) {
@@ -144,18 +146,17 @@ export class AuthService {
           platform,
           platformUserId,
           platformUsername,
-          accessToken,
-          refreshToken,
+          ...this.vault.encryptForStorage(accessToken, refreshToken),
           tokenExpiresAt,
-          metadata: (metadata as any) ?? undefined,
+          metadata: (metadata as Prisma.InputJsonValue) ?? undefined,
         },
         update: {
           platformUserId,
           platformUsername,
-          accessToken,
-          refreshToken,
+          ...this.vault.encryptForStorage(accessToken, refreshToken),
           tokenExpiresAt,
-          metadata: (metadata as any) ?? undefined,
+          status: 'ACTIVE',
+          metadata: (metadata as Prisma.InputJsonValue) ?? undefined,
         },
       });
     }

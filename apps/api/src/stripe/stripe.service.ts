@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import Stripe from 'stripe';
+import { userAppUrl } from '../config/app-urls';
 
 @Injectable()
 export class StripeService {
@@ -30,7 +31,7 @@ export class StripeService {
     // subscription is confirmed, so they're never billed for both at once.
     previousStripeSubscriptionId?: string;
   }): Promise<string> {
-    const userAppUrl = process.env.USER_APP_URL || 'http://localhost:4220';
+    const appUrl = userAppUrl();
     const metadata = {
       userId: params.userId,
       planId: params.planId,
@@ -40,8 +41,8 @@ export class StripeService {
       mode: 'subscription',
       customer: params.customerId,
       line_items: [{ price: params.priceId, quantity: 1 }],
-      success_url: `${userAppUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${userAppUrl}/billing/cancelled`,
+      success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appUrl}/billing/cancelled`,
       metadata,
       subscription_data: { metadata },
     });

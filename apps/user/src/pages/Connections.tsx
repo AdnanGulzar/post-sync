@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, ConnectedAccount, SocialPlatform } from '@syncpost/api-client';
+import { ALL_PLATFORMS as PLATFORMS } from '@syncpost/platform-core';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Skeleton, toast } from '@syncpost/ui';
 import { api } from '../lib/api';
 
-const PLATFORMS: { key: SocialPlatform; label: string }[] = [
-  { key: 'LINKEDIN', label: 'LinkedIn' },
-  { key: 'FACEBOOK', label: 'Facebook' },
-  { key: 'X', label: 'X (Twitter)' },
-];
 
 const DESTINATION_LABEL: Record<string, string> = {
   PERSONAL: 'Personal',
@@ -84,7 +80,7 @@ export default function Connections() {
         {loading ? (
           <ul className="divide-y">
             {PLATFORMS.map((p) => (
-              <li key={p.key} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+              <li key={p.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
                 <Skeleton className="h-4 w-48" />
                 <Skeleton className="h-8 w-24" />
               </li>
@@ -93,13 +89,13 @@ export default function Connections() {
         ) : (
           <ul className="divide-y">
             {PLATFORMS.map((p) => {
-              const destinations = accounts.filter((a) => a.platform === p.key);
+              const destinations = accounts.filter((a) => a.platform === p.id);
               return (
-                <li key={p.key} className="py-3 first:pt-0 last:pb-0">
+                <li key={p.id} className="py-3 first:pt-0 last:pb-0">
                   <div className="mb-2 flex items-center justify-between">
                     <strong className="text-sm font-medium">{p.label}</strong>
-                    <Button size="sm" disabled={connectingTo === p.key} onClick={() => connect(p.key)}>
-                      {connectingTo === p.key ? 'Redirecting...' : destinations.length > 0 ? '+ Connect another' : 'Connect'}
+                    <Button size="sm" disabled={connectingTo === p.id} onClick={() => connect(p.id)}>
+                      {connectingTo === p.id ? 'Redirecting...' : destinations.length > 0 ? '+ Connect another' : 'Connect'}
                     </Button>
                   </div>
                   {destinations.length === 0 ? (

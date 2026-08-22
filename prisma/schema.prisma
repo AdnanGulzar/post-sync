@@ -39,14 +39,30 @@ enum PostStatus {
   PARTIAL
 }
 
+/// Lifecycle of one destination within a post.
+///
+/// RETRYING distinguishes "failed but will be re-attempted" from a terminal
+/// FAILED. Without it every failure looked permanent and nothing was ever
+/// retried, however transient the cause.
 enum PublishStatus {
   PENDING
   SUCCESS
+  RETRYING
   FAILED
 }
 
 // What kind of destination a connected account posts to. Not every platform
 // supports every type — see each publisher service for what's actually wired up.
+/// Whether an account can still publish.
+///
+/// NEEDS_RECONNECT means the provider rejected our credentials and refreshing
+/// failed, so the user must re-authorise. Previously a dead token surfaced only
+/// as an opaque 500 at publish time with no way to tell the user why.
+enum AccountStatus {
+  ACTIVE
+  NEEDS_RECONNECT
+}
+
 enum DestinationType {
   PERSONAL
   PAGE
@@ -133,16 +149,28 @@ model SocialAccount {
   destinationType   DestinationType @default(PERSONAL)
   platformUserId    String
   platformUsername  String?
+
+  // Encrypted at rest with AES-256-GCM (see TokenVault). These were plaintext
+  // columns, so a database dump was full posting control over every connected
+  // account. keyVersion identifies which key encrypted the row so keys can be
+  // rotated without re-encrypting everything at once.
   accessToken       String
   refreshToken      String?
+  keyVersion        Int             @default(1)
+
   tokenExpiresAt    DateTime?
   scopes            String?
+  status            AccountStatus   @default(ACTIVE)
   connectedAt       DateTime        @default(now())
   metadata          Json?
 
   results PostPublishResult[]
 
   @@unique([userId, platform, platformUserId])
+  // The publish path resolves a user's destinations on every post.
+  @@index([userId])
+  // The refresh sweep scans for accounts nearing expiry.
+  @@index([status, tokenExpiresAt])
   @@map("social_accounts")
 }
 
@@ -170,6 +198,10 @@ model Post {
 
   results     PostPublishResult[]
 
+  // The scheduler scans this every 60 seconds; unindexed it was a full table
+  // scan degrading linearly with total post count.
+  @@index([status, scheduledAt])
+  @@index([userId])
   @@map("posts")
 }
 
@@ -189,8 +221,20 @@ model PostPublishResult {
   platformPostId  String?
   error           String?
   publishedAt     DateTime?
+
+  /// How many publish attempts this destination has had. Capped by the worker
+  /// so a permanently broken destination cannot retry forever.
+  attemptCount    Int            @default(0)
+  /// When the worker may next attempt this destination. Null means "not
+  /// scheduled for retry" — either it succeeded or it failed permanently.
+  nextRetryAt     DateTime?
+
   createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@unique([postId, socialAccountId])
+  @@index([postId])
+  /// Drives the retry sweep.
+  @@index([status, nextRetryAt])
   @@map("post_publish_results")
 }

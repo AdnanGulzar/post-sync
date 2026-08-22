@@ -3,9 +3,11 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../common/decorators/authenticated-user';
 import { AdminService } from './admin.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { GrantSubscriptionDto } from './dto/grant-subscription.dto';
+import { ParseEntityIdPipe } from '../common/pipes/parse-entity-id.pipe';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN')
@@ -19,26 +21,26 @@ export class AdminController {
   }
 
   @Post('users')
-  createUser(@CurrentUser() admin: any, @Body() dto: CreateUserDto) {
+  createUser(@CurrentUser() admin: AuthenticatedUser, @Body() dto: CreateUserDto) {
     return this.adminService.createUser(admin.id, dto);
   }
 
   @Patch('users/:id/subscription')
   grantSubscription(
-    @CurrentUser() admin: any,
-    @Param('id') userId: string,
+    @CurrentUser() admin: AuthenticatedUser,
+    @Param('id', ParseEntityIdPipe) userId: string,
     @Body() dto: GrantSubscriptionDto,
   ) {
     return this.adminService.grantSubscription(admin.id, userId, dto);
   }
 
   @Patch('users/:id/deactivate')
-  deactivateUser(@Param('id') userId: string) {
+  deactivateUser(@Param('id', ParseEntityIdPipe) userId: string) {
     return this.adminService.deactivateUser(userId);
   }
 
   @Patch('users/:id/reactivate')
-  reactivateUser(@Param('id') userId: string) {
+  reactivateUser(@Param('id', ParseEntityIdPipe) userId: string) {
     return this.adminService.reactivateUser(userId);
   }
 }

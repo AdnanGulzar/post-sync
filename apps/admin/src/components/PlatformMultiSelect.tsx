@@ -1,11 +1,7 @@
 import { SocialPlatform } from '@syncpost/api-client';
+import { ALL_PLATFORMS as PLATFORMS } from '@syncpost/platform-core';
 import { Checkbox } from '@syncpost/ui';
 
-const PLATFORMS: { key: SocialPlatform; label: string }[] = [
-  { key: 'LINKEDIN', label: 'LinkedIn' },
-  { key: 'FACEBOOK', label: 'Facebook' },
-  { key: 'X', label: 'X' },
-];
 
 export function PlatformMultiSelect({
   value,
@@ -21,8 +17,8 @@ export function PlatformMultiSelect({
   return (
     <div className="flex flex-col gap-1">
       {PLATFORMS.map((p) => (
-        <label key={p.key} className="flex items-center gap-1.5 text-xs">
-          <Checkbox checked={value.includes(p.key)} onCheckedChange={() => toggle(p.key)} />
+        <label key={p.id} className="flex items-center gap-1.5 text-xs">
+          <Checkbox checked={value.includes(p.id)} onCheckedChange={() => toggle(p.id)} />
           {p.label}
         </label>
       ))}

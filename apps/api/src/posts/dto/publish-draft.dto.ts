@@ -8,7 +8,7 @@ export class PublishDraftDto {
   @IsArray()
   @ArrayMinSize(1)
   @IsString({ each: true })
-  destinationIds: string[];
+  destinationIds!: string[];
 
   // Any of these override what was saved on the draft; omit to keep it as-is.
   @IsOptional()

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, ConnectedAccount, Post, SocialPlatform } from '@syncpost/api-client';
+import { ALL_PLATFORMS as PLATFORMS } from '@syncpost/platform-core';
 import { Badge, Button, Card, CardContent, Checkbox, Skeleton, Textarea, toast } from '@syncpost/ui';
 import { api } from '../lib/api';
 import { DateTimePicker } from './DateTimePicker';
@@ -14,11 +15,6 @@ const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'warning' | 'in
   DRAFT: 'secondary',
 };
 
-const PLATFORMS: { key: SocialPlatform; label: string }[] = [
-  { key: 'LINKEDIN', label: 'LinkedIn' },
-  { key: 'FACEBOOK', label: 'Facebook' },
-  { key: 'X', label: 'X (Twitter)' },
-];
 
 const DESTINATION_LABEL: Record<string, string> = {
   PERSONAL: 'Personal',
@@ -242,10 +238,10 @@ export function PostsList({ posts, loading, onChanged, accounts, limit }: PostsL
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="space-y-2">
                     {PLATFORMS.map((p) => {
-                      const destinations = accounts.filter((a) => a.platform === p.key);
+                      const destinations = accounts.filter((a) => a.platform === p.id);
                       if (destinations.length === 0) return null;
                       return (
-                        <div key={p.key}>
+                        <div key={p.id}>
                           <p className="mb-1 text-xs font-medium text-muted-foreground">{p.label}</p>
                           <div className="flex flex-wrap gap-3">
                             {destinations.map((d) => (

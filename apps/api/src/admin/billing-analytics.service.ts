@@ -74,7 +74,13 @@ export class BillingAnalyticsService {
     const users = customerIds.length
       ? await this.prisma.user.findMany({
           where: { subscription: { stripeCustomerId: { in: customerIds } } },
-          include: { subscription: { include: { plan: true } } },
+          // Only what the payments table renders; `include` would pull every
+          // scalar column, passwordHash among them.
+          select: {
+            name: true,
+            email: true,
+            subscription: { select: { stripeCustomerId: true, plan: { select: { name: true } } } },
+          },
         })
       : [];
     const userByCustomerId = new Map(users.map((u) => [u.subscription?.stripeCustomerId as string, u]));

@@ -1,6 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  USER_SAFE_SELECT,
+  USER_WITH_SUBSCRIPTION_SELECT,
+} from '../common/prisma/user-select';
 import { PlansService } from '../subscriptions/plans.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { GrantSubscriptionDto } from './dto/grant-subscription.dto';
@@ -15,10 +19,7 @@ export class AdminService {
   async listUsers() {
     return this.prisma.user.findMany({
       where: { role: 'USER' },
-      include: {
-        subscription: { include: { plan: true } },
-        socialAccounts: { select: { platform: true, connectedAt: true } },
-      },
+      select: USER_WITH_SUBSCRIPTION_SELECT,
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -41,7 +42,7 @@ export class AdminService {
         // since the admin is vouching for this user manually.
         subscription: { create: { planId, status: 'ACTIVE' } },
       },
-      include: { subscription: { include: { plan: true } } },
+      select: { ...USER_SAFE_SELECT, subscription: { include: { plan: true } } },
     });
   }
 
@@ -74,10 +75,18 @@ export class AdminService {
   async deactivateUser(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
-    return this.prisma.user.update({ where: { id: userId }, data: { isActive: false } });
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { isActive: false },
+      select: USER_SAFE_SELECT,
+    });
   }
 
   async reactivateUser(userId: string) {
-    return this.prisma.user.update({ where: { id: userId }, data: { isActive: true } });
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { isActive: true },
+      select: USER_SAFE_SELECT,
+    });
   }
 }

@@ -40,8 +40,9 @@ export interface SocialPlatformService {
   /**
    * Publishes `content` (and optional image) to this specific destination.
    * When `scheduledAt` is passed and the destination supports native scheduling
-   * (see isNativelySchedulable), the provider itself holds and publishes the post
-   * at that time instead of publishing immediately.
+   * (see the platform descriptor's `capabilities.nativeScheduling`), the
+   * provider itself holds and publishes the post at that time instead of
+   * publishing immediately.
    */
   publish(account: SocialAccount, content: string, imageUrl?: string, scheduledAt?: Date): Promise<PublishResult>;
 

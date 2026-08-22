@@ -17,12 +17,6 @@ import {
 } from '@syncpost/ui';
 import { api } from '../lib/api';
 
-const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'destructive'> = {
-  ACTIVE: 'success',
-  INACTIVE: 'warning',
-  EXPIRED: 'destructive',
-};
-
 function StatTile({ label, value }: { label: string; value: string | number }) {
   return (
     <Card>
